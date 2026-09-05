@@ -25,3 +25,6 @@ dist-ssr
 
 .vercel
 package-lock.json
+
+# Copied from node_modules by scripts/sync-mediapipe-wasm.mjs (postinstall)
+public/vendor/mediapipe/wasm

@@ -1,60 +1,65 @@
 import {
-  FaceDetector,
+  FaceLandmarker,
   FilesetResolver,
-  type Detection,
+  type FaceLandmarkerResult,
 } from '@mediapipe/tasks-vision'
 
-const WASM_URL =
-  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
-const MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite'
+// Self-hosted assets — served from our own origin, no CDN at runtime.
+// The wasm folder is copied from node_modules by the `postinstall` script;
+// face_landmarker.task is committed under public/models/.
+const WASM_PATH = `${import.meta.env.BASE_URL}vendor/mediapipe/wasm`
+const MODEL_PATH = `${import.meta.env.BASE_URL}models/face_landmarker.task`
 
 let visionResolver: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>> | null =
   null
-let videoDetector: FaceDetector | null = null
-let imageDetector: FaceDetector | null = null
-let imageDetectorPromise: Promise<FaceDetector> | null = null
+let videoLandmarker: FaceLandmarker | null = null
+let imageLandmarker: FaceLandmarker | null = null
+let imageLandmarkerPromise: Promise<FaceLandmarker> | null = null
 let videoLoadingPromise: Promise<void> | null = null
 let videoNeedsReinit = false
 
 async function getVisionResolver() {
   if (!visionResolver) {
-    visionResolver = await FilesetResolver.forVisionTasks(WASM_URL)
+    visionResolver = await FilesetResolver.forVisionTasks(WASM_PATH)
   }
   return visionResolver
 }
 
-async function createDetector(
+async function createLandmarker(
   runningMode: 'VIDEO' | 'IMAGE',
   delegate: 'GPU' | 'CPU',
-): Promise<FaceDetector> {
+): Promise<FaceLandmarker> {
   const vision = await getVisionResolver()
-  return FaceDetector.createFromOptions(vision, {
+  return FaceLandmarker.createFromOptions(vision, {
     baseOptions: {
-      modelAssetPath: MODEL_URL,
+      modelAssetPath: MODEL_PATH,
       delegate,
     },
     runningMode,
-    minDetectionConfidence: 0.5,
+    numFaces: 1,
+    minFaceDetectionConfidence: 0.5,
+    minFacePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+    outputFacialTransformationMatrixes: true,
   })
 }
 
-async function createDetectorWithFallback(
+async function createLandmarkerWithFallback(
   runningMode: 'VIDEO' | 'IMAGE',
-): Promise<FaceDetector> {
+): Promise<FaceLandmarker> {
   try {
-    return await createDetector(runningMode, 'GPU')
+    return await createLandmarker(runningMode, 'GPU')
   } catch {
-    return createDetector(runningMode, 'CPU')
+    return createLandmarker(runningMode, 'CPU')
   }
 }
 
-async function ensureVideoDetector() {
-  if (videoDetector && !videoNeedsReinit) return
+async function ensureVideoLandmarker() {
+  if (videoLandmarker && !videoNeedsReinit) return
 
   if (!videoLoadingPromise) {
     videoLoadingPromise = (async () => {
-      videoDetector = await createDetectorWithFallback('VIDEO')
+      videoLandmarker = await createLandmarkerWithFallback('VIDEO')
       videoNeedsReinit = false
     })().finally(() => {
       videoLoadingPromise = null
@@ -64,49 +69,55 @@ async function ensureVideoDetector() {
   await videoLoadingPromise
 }
 
-async function ensureImageDetector() {
-  if (imageDetector) return imageDetector
+async function ensureImageLandmarker() {
+  if (imageLandmarker) return imageLandmarker
 
-  if (!imageDetectorPromise) {
-    imageDetectorPromise = createDetectorWithFallback('IMAGE').finally(() => {
-      imageDetectorPromise = null
+  if (!imageLandmarkerPromise) {
+    imageLandmarkerPromise = createLandmarkerWithFallback('IMAGE').finally(() => {
+      imageLandmarkerPromise = null
     })
   }
 
-  imageDetector = await imageDetectorPromise
-  return imageDetector
+  imageLandmarker = await imageLandmarkerPromise
+  return imageLandmarker
 }
 
 export async function initFaceDetection() {
-  await ensureVideoDetector()
+  await ensureVideoLandmarker()
 }
 
-export function detectFacesInVideo(
+const EMPTY_RESULT: FaceLandmarkerResult = {
+  faceLandmarks: [],
+  faceBlendshapes: [],
+  facialTransformationMatrixes: [],
+}
+
+export function detectFaceInVideo(
   video: HTMLVideoElement,
   timestamp: number,
-): Detection[] {
-  if (!videoDetector || video.videoWidth === 0 || video.videoHeight === 0) {
-    return []
+): FaceLandmarkerResult {
+  if (!videoLandmarker || video.videoWidth === 0 || video.videoHeight === 0) {
+    return EMPTY_RESULT
   }
 
   try {
-    return videoDetector.detectForVideo(video, timestamp).detections
+    return videoLandmarker.detectForVideo(video, timestamp)
   } catch {
     videoNeedsReinit = true
-    videoDetector = null
-    return []
+    videoLandmarker = null
+    return EMPTY_RESULT
   }
 }
 
-export async function detectFacesInImage(
+export async function detectFaceInImage(
   source: HTMLImageElement | HTMLCanvasElement,
-): Promise<Detection[]> {
-  const detector = await ensureImageDetector()
+): Promise<FaceLandmarkerResult> {
+  const landmarker = await ensureImageLandmarker()
   try {
-    return detector.detect(source).detections
+    return landmarker.detect(source)
   } catch {
-    imageDetector = null
-    const retryDetector = await ensureImageDetector()
-    return retryDetector.detect(source).detections
+    imageLandmarker = null
+    const retry = await ensureImageLandmarker()
+    return retry.detect(source)
   }
 }

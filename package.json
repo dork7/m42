@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sync-mediapipe-wasm": "node scripts/sync-mediapipe-wasm.mjs",
+    "postinstall": "node scripts/sync-mediapipe-wasm.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",

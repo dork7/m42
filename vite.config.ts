@@ -4,6 +4,7 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: true,
     proxy: {
       '/api/analyze-skin': {
         target: 'https://matifimran.app.n8n.cloud',
