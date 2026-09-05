@@ -59,8 +59,24 @@ export const CFG = {
   maskLipRednessRatio: 1.04, // bare lips are at least this much redder than cheeks
   maskFlatMax: 22, // (unused for now) lower-face luma std-dev = smooth fabric
 
+  // Partial occlusion (a hand / hair covering one side of the face). Compare the
+  // left and right halves of the eye–cheek band: on a real frontal face they
+  // match; a covering flattens one side (its eye/features vanish) and usually
+  // shifts its colour or brightness.
+  occlusionMinFaceW: 0.14, // skip if the face is smaller than this (raw frame)
+  occlusionColorDelta: 38, // RGB distance between the two halves = different stuff
+  occlusionFlatMax: 15, // a half with std-dev below this has lost its eye/features
+  occlusionStdRatio: 0.5, // flatter half < this fraction of the busier half
+  occlusionLumDelta: 28, // brightness gap between the halves
+  occlusionStdRatioLoose: 0.72, // std ratio paired with the brightness gap
+
   coverageMinSkinLum: 40, // below this the face is too dark to judge coverage
   coverageConfirmFrames: 3, // frames the covered/clear flip must hold
+
+  // --- Capture quality: only checked on the final still (sampleFaceSharpness).
+  // Mean luma gradient over an 80×80 crop of the face — sharp ~10–30, a blurry
+  // or out-of-focus face ~2–6. ---
+  sharpnessMin: 5,
 }
 
 // MediaPipe canonical 478-point face mesh indices, grouped into sampling regions.
@@ -96,12 +112,18 @@ export type Check = {
 export type FaceStatus =
   | 'no_face'
   | 'covered'
+  | 'blurry'
   | 'too_far'
   | 'too_close'
   | 'off_center'
   | 'valid'
 
-export type CoverageKind = 'clear' | 'glasses' | 'mask' | 'unknown'
+export type CoverageKind =
+  | 'clear'
+  | 'glasses'
+  | 'mask'
+  | 'occluded'
+  | 'unknown'
 
 export type CoverageResult = Check & {
   ok: boolean
@@ -254,6 +276,47 @@ export function sampleFaceBrightness(
   return sum / (data.length / 4)
 }
 
+/**
+ * Rough focus / motion-blur score for the face: the mean luma gradient over the
+ * face drawn into an 80×80 crop, so it's roughly independent of source
+ * resolution. A sharp face keeps crisp eye / nostril / lip edges (~10–30); a
+ * blurry one goes mushy (~2–6). Only meaningful on the final still.
+ */
+export function sampleFaceSharpness(
+  source: CanvasImageSource,
+  sourceW: number,
+  sourceH: number,
+  box: FaceBox,
+  sampleCtx: CanvasRenderingContext2D,
+): number {
+  const { canvas } = sampleCtx
+  const w = canvas.width
+  const h = canvas.height
+  const sx = Math.max(0, box.minX * sourceW)
+  const sy = Math.max(0, box.minY * sourceH)
+  const sw = Math.max(1, box.w * sourceW)
+  const sh = Math.max(1, box.h * sourceH)
+  sampleCtx.clearRect(0, 0, w, h)
+  sampleCtx.drawImage(source, sx, sy, sw, sh, 0, 0, w, h)
+  const { data } = sampleCtx.getImageData(0, 0, w, h)
+
+  const lumAt = (i: number) =>
+    0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]
+
+  let sum = 0
+  let count = 0
+  for (let y = 1; y < h - 1; y += 1) {
+    for (let x = 1; x < w - 1; x += 1) {
+      const i = (y * w + x) * 4
+      const gx = lumAt(i + 4) - lumAt(i - 4)
+      const gy = lumAt(i + w * 4) - lumAt(i - w * 4)
+      sum += Math.abs(gx) + Math.abs(gy)
+      count += 1
+    }
+  }
+  return count ? sum / count : 0
+}
+
 type RegionStats = {
   lum: number
   stdDev: number
@@ -261,6 +324,65 @@ type RegionStats = {
   g: number
   b: number
   brightFrac: number
+}
+
+function statsFromImageData(data: Uint8ClampedArray): RegionStats {
+  const n = data.length / 4
+  let sumL = 0
+  let sumR = 0
+  let sumG = 0
+  let sumB = 0
+  const lums = new Float64Array(n)
+  for (let i = 0, j = 0; i < data.length; i += 4, j += 1) {
+    const l = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]
+    lums[j] = l
+    sumL += l
+    sumR += data[i]
+    sumG += data[i + 1]
+    sumB += data[i + 2]
+  }
+  const meanL = sumL / n
+  let variance = 0
+  let bright = 0
+  for (let j = 0; j < n; j += 1) {
+    variance += (lums[j] - meanL) ** 2
+    if (lums[j] > 235) bright += 1
+  }
+  return {
+    lum: meanL,
+    stdDev: Math.sqrt(variance / n),
+    r: sumR / n,
+    g: sumG / n,
+    b: sumB / n,
+    brightFrac: bright / n,
+  }
+}
+
+/**
+ * Stats for an arbitrary normalized rectangle of the source (0–1 coords),
+ * drawn into the shared sample canvas. Returns null if the rect is degenerate.
+ */
+function sampleNormRect(
+  source: CanvasImageSource,
+  sourceW: number,
+  sourceH: number,
+  nx: number,
+  ny: number,
+  nw: number,
+  nh: number,
+  sampleCtx: CanvasRenderingContext2D,
+): RegionStats | null {
+  const sx = Math.min(sourceW - 1, Math.max(0, nx * sourceW))
+  const sy = Math.min(sourceH - 1, Math.max(0, ny * sourceH))
+  const sw = Math.min(sourceW - sx, Math.max(1, nw * sourceW))
+  const sh = Math.min(sourceH - sy, Math.max(1, nh * sourceH))
+  if (sw < 4 || sh < 4) return null
+  const { canvas } = sampleCtx
+  sampleCtx.clearRect(0, 0, canvas.width, canvas.height)
+  sampleCtx.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
+  return statsFromImageData(
+    sampleCtx.getImageData(0, 0, canvas.width, canvas.height).data,
+  )
 }
 
 /**
@@ -299,37 +421,9 @@ export function sampleRegionStats(
   const { canvas } = sampleCtx
   sampleCtx.clearRect(0, 0, canvas.width, canvas.height)
   sampleCtx.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
-  const { data } = sampleCtx.getImageData(0, 0, canvas.width, canvas.height)
-
-  const n = data.length / 4
-  let sumL = 0
-  let sumR = 0
-  let sumG = 0
-  let sumB = 0
-  const lums: number[] = new Array(n)
-  for (let i = 0, j = 0; i < data.length; i += 4, j += 1) {
-    const l = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]
-    lums[j] = l
-    sumL += l
-    sumR += data[i]
-    sumG += data[i + 1]
-    sumB += data[i + 2]
-  }
-  const meanL = sumL / n
-  let variance = 0
-  let bright = 0
-  for (let j = 0; j < n; j += 1) {
-    variance += (lums[j] - meanL) ** 2
-    if (lums[j] > 235) bright += 1
-  }
-  return {
-    lum: meanL,
-    stdDev: Math.sqrt(variance / n),
-    r: sumR / n,
-    g: sumG / n,
-    b: sumB / n,
-    brightFrac: bright / n,
-  }
+  return statsFromImageData(
+    sampleCtx.getImageData(0, 0, canvas.width, canvas.height).data,
+  )
 }
 
 type RGB = { r: number; g: number; b: number }
@@ -357,6 +451,12 @@ const MASK_RESULT: CoverageResult = {
   label: 'Uncover Face',
   ok: false,
   kind: 'mask',
+}
+const OCCLUSION_RESULT: CoverageResult = {
+  level: 'bad',
+  label: 'Uncover Face',
+  ok: false,
+  kind: 'occluded',
 }
 const CLEAR_RESULT: CoverageResult = {
   level: 'good',
@@ -454,6 +554,40 @@ export function evaluateCoverage(
 
   const mask = !!lowerFace && notBeard && (sigColourBreak || sigLipsHidden)
 
+  // --- Partial occlusion: a hand / hair over one side of the face ---
+  // On a frontal face the left and right halves of the eye–cheek band match:
+  // each holds an eye (busy, similar brightness). A covering flattens one half
+  // and usually shifts its colour or brightness.
+  const rawBox = faceBoxFromLandmarks(landmarks)
+  const bandY = rawBox.minY + rawBox.h * 0.16
+  const bandH = rawBox.h * 0.54
+  const halfW = rawBox.w * 0.38
+  const leftHalf =
+    rawBox.w >= CFG.occlusionMinFaceW
+      ? sampleNormRect(source, sourceW, sourceH, rawBox.minX + rawBox.w * 0.06, bandY, halfW, bandH, sampleCtx)
+      : null
+  const rightHalf =
+    rawBox.w >= CFG.occlusionMinFaceW
+      ? sampleNormRect(source, sourceW, sourceH, rawBox.minX + rawBox.w * 0.56, bandY, halfW, bandH, sampleCtx)
+      : null
+
+  let symColor = 0
+  let symLum = 0
+  let symStdRatio = 1
+  let occluded = false
+  if (leftHalf && rightHalf) {
+    symColor = rgbDistance(leftHalf, rightHalf)
+    symLum = Math.abs(leftHalf.lum - rightHalf.lum)
+    const lo = Math.min(leftHalf.stdDev, rightHalf.stdDev)
+    const hi = Math.max(leftHalf.stdDev, rightHalf.stdDev, 1)
+    symStdRatio = lo / hi
+    occluded =
+      symColor > CFG.occlusionColorDelta ||
+      (lo < CFG.occlusionFlatMax && symStdRatio < CFG.occlusionStdRatio) ||
+      (symLum > CFG.occlusionLumDelta &&
+        symStdRatio < CFG.occlusionStdRatioLoose)
+  }
+
   if (coverageDebugEnabled() && coverageDebugTick++ % 4 === 0) {
     // eslint-disable-next-line no-console
     console.log('[coverage]', {
@@ -475,12 +609,17 @@ export function evaluateCoverage(
       sigUnskinlike,
       sigColourBreak,
       sigLipsHidden,
-      verdict: glasses ? 'glasses' : mask ? 'mask' : 'clear',
+      symColor: +symColor.toFixed(1),
+      symLum: +symLum.toFixed(1),
+      symStdRatio: +symStdRatio.toFixed(2),
+      occluded,
+      verdict: glasses ? 'glasses' : mask ? 'mask' : occluded ? 'occluded' : 'clear',
     })
   }
 
   if (glasses) return GLASSES_RESULT
   if (mask) return MASK_RESULT
+  if (occluded) return OCCLUSION_RESULT
   return CLEAR_RESULT
 }
 
@@ -547,6 +686,7 @@ function evaluatePosition(box: FaceBox): {
 const POSITION_MESSAGES: Record<FaceStatus, string> = {
   no_face: 'Position your face in the circle',
   covered: 'Uncover your face',
+  blurry: 'Photo looks blurry — hold steady and retake',
   too_far: 'Move a little closer',
   too_close: 'Move back a little',
   off_center: 'Center your face in the frame',
@@ -557,6 +697,7 @@ const COVERAGE_MESSAGES: Record<CoverageKind, string> = {
   clear: '',
   glasses: 'Take off your glasses',
   mask: 'Take off your face mask',
+  occluded: 'Keep your whole face visible',
   unknown: 'Uncover your face',
 }
 
@@ -567,12 +708,15 @@ const COVERAGE_MESSAGES: Record<CoverageKind, string> = {
  * its own); `coverage` defaults to a passing "unknown" result. `frame` is the
  * camera/image pixel size — pass it so the position check runs in the visible,
  * object-cover-cropped space rather than against the full uncropped frame.
+ * `sharpness` (from sampleFaceSharpness) is only passed for the final still —
+ * null on the live feed, where per-frame motion blur is expected.
  */
 export function evaluateFace(
   result: FaceLandmarkerResult,
   brightness: number | null,
   coverage: CoverageResult = UNKNOWN_COVERAGE,
   frame?: { w: number; h: number },
+  sharpness: number | null = null,
 ): FaceEvaluation {
   const landmarks = result.faceLandmarks?.[0]
   if (!landmarks || landmarks.length === 0) return NO_FACE
@@ -604,18 +748,23 @@ export function evaluateFace(
       pitch: angles ? +angles.pitch.toFixed(1) : null,
       roll: angles ? +angles.roll.toFixed(1) : null,
       brightness: brightness === null ? null : +brightness.toFixed(1),
+      sharpness: sharpness === null ? null : +sharpness.toFixed(1),
       position: position.status,
       pose: pose.label,
     })
   }
 
-  const allGood = light.ok && pose.ok && position.ok && coverage.ok
+  const blurry = sharpness !== null && sharpness < CFG.sharpnessMin
+  const allGood =
+    light.ok && pose.ok && position.ok && coverage.ok && !blurry
 
   let message: string
   if (allGood) {
     message = 'Hold still…'
   } else if (!coverage.ok) {
     message = COVERAGE_MESSAGES[coverage.kind] || POSITION_MESSAGES.covered
+  } else if (blurry) {
+    message = POSITION_MESSAGES.blurry
   } else if (!position.ok && position.status !== 'valid') {
     message = POSITION_MESSAGES[position.status]
   } else if (!pose.ok) {
@@ -628,7 +777,9 @@ export function evaluateFace(
     ? 'valid'
     : !coverage.ok
       ? 'covered'
-      : position.status
+      : blurry
+        ? 'blurry'
+        : position.status
 
   return {
     faceFound: true,

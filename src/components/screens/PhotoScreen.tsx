@@ -1,4 +1,4 @@
-import { Camera, ImageUp, Sparkles } from 'lucide-react'
+import { AlertTriangle, Camera, ImageUp, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useFlow } from '../../context/FlowContext'
 import {
@@ -21,6 +21,7 @@ import {
   faceBoxFromLandmarks,
   loadImageFromDataUrl,
   sampleFaceBrightness,
+  sampleFaceSharpness,
   UNKNOWN_COVERAGE,
   type CoverageResult,
   type FaceEvaluation,
@@ -232,11 +233,19 @@ export function PhotoScreen() {
       const result = await detectFaceInImage(img)
       const landmarks = result.faceLandmarks?.[0]
       let brightness: number | null = null
+      let sharpness: number | null = null
       let coverage: CoverageResult = UNKNOWN_COVERAGE
       if (landmarks && landmarks.length > 0) {
         const box = faceBoxFromLandmarks(landmarks)
         try {
           brightness = sampleFaceBrightness(
+            img,
+            img.naturalWidth,
+            img.naturalHeight,
+            box,
+            getSampleCtx(),
+          )
+          sharpness = sampleFaceSharpness(
             img,
             img.naturalWidth,
             img.naturalHeight,
@@ -254,10 +263,13 @@ export function PhotoScreen() {
           brightness = null
         }
       }
-      return evaluateFace(result, brightness, coverage, {
-        w: img.naturalWidth,
-        h: img.naturalHeight,
-      })
+      return evaluateFace(
+        result,
+        brightness,
+        coverage,
+        { w: img.naturalWidth, h: img.naturalHeight },
+        sharpness,
+      )
     },
     [getSampleCtx],
   )
@@ -487,6 +499,10 @@ export function PhotoScreen() {
   }
 
   const canContinue = faceEval.allGood && detectorReady && !isValidating
+  const photoRejected = !isValidating && detectorReady && !faceEval.allGood
+  const rejectReason = faceEval.faceFound
+    ? faceEval.message
+    : "We can't find your face clearly in this photo."
 
   if (mode === 'preview' && photo) {
     return (
@@ -524,13 +540,19 @@ export function PhotoScreen() {
         </div>
         {isValidating ? (
           <ValidatingBar label="Checking your photo…" />
-        ) : (
-          <p
-            className={`mt-3 text-center text-[13px] ${
-              faceEval.allGood ? 'text-ink-muted' : 'text-berry'
-            }`}
-            role={faceEval.allGood ? undefined : 'alert'}
+        ) : photoRejected ? (
+          <div
+            className="mt-3 w-full max-w-[280px] rounded-panel border border-berry/30 bg-berry-soft/50 p-3 text-center"
+            role="alert"
           >
+            <div className="flex items-center justify-center gap-1.5 text-[13px] font-semibold text-berry">
+              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+              This photo isn&apos;t clear enough
+            </div>
+            <p className="mt-1 text-[13px] text-ink-muted">{rejectReason}</p>
+          </div>
+        ) : (
+          <p className="mt-3 text-center text-[13px] text-ink-muted">
             {faceEval.message}
           </p>
         )}
@@ -538,12 +560,23 @@ export function PhotoScreen() {
           Your photo stays private and isn&apos;t used to train anything.
         </p>
         <div className="mt-6 flex w-full max-w-xs flex-col gap-3">
-          <Button onClick={nextStep} disabled={!canContinue}>
-            Continue
-          </Button>
-          <Button variant="secondary" onClick={handleRetake}>
-            Retake
-          </Button>
+          {photoRejected ? (
+            <>
+              <Button onClick={handleRetake}>Retake photo</Button>
+              <Button variant="secondary" onClick={nextStep} disabled>
+                Continue
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={nextStep} disabled={!canContinue}>
+                Continue
+              </Button>
+              <Button variant="secondary" onClick={handleRetake}>
+                Retake
+              </Button>
+            </>
+          )}
         </div>
       </div>
     )
