@@ -1,4 +1,4 @@
-import { AlertTriangle, Camera, ImageUp, Zap } from 'lucide-react'
+import { AlertTriangle, Camera, ImageUp, Scan, Zap } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useFlow } from '../../context/FlowContext'
 import {
@@ -26,7 +26,7 @@ import {
   type CoverageResult,
   type FaceEvaluation,
 } from '../../lib/faceGuide'
-import { FaceGuideOverlay } from '../FaceGuideOverlay'
+import { FaceGuideOverlay, type GuideShape } from '../FaceGuideOverlay'
 import { FaceStatusChips } from '../FaceStatusChips'
 import { ScanningOverlay, ValidatingBar } from '../ScanningOverlay'
 import { Button } from '../ui/Button'
@@ -115,6 +115,13 @@ export function PhotoScreen() {
       return false
     }
   })
+  const [guideShape, setGuideShape] = useState<GuideShape>(() => {
+    try {
+      return localStorage.getItem('photoGuideShape') === 'oval' ? 'oval' : 'rectangle'
+    } catch {
+      return 'rectangle'
+    }
+  })
 
   const getSampleCtx = useCallback(() => {
     if (!sampleCtxRef.current) sampleCtxRef.current = createSampleCanvasCtx()
@@ -175,6 +182,14 @@ export function PhotoScreen() {
       /* ignore */
     }
   }, [autoCapture])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('photoGuideShape', guideShape)
+    } catch {
+      /* ignore */
+    }
+  }, [guideShape])
 
   useEffect(() => {
     if (!blurBackground || blurReadyRef.current) return
@@ -569,7 +584,7 @@ export function PhotoScreen() {
             alt="Your uploaded face photo for skin analysis"
             className="aspect-[3/4] w-full max-w-[280px] object-cover"
           />
-          <FaceGuideOverlay valid={faceEval.allGood} />
+          <FaceGuideOverlay valid={faceEval.allGood} shape={guideShape} />
           {isValidating && <ScanningOverlay />}
         </div>
         {isValidating ? (
@@ -648,7 +663,7 @@ export function PhotoScreen() {
               blurBackground ? '' : 'hidden'
             }`}
           />
-          <FaceGuideOverlay valid={faceEval.allGood} />
+          <FaceGuideOverlay valid={faceEval.allGood} shape={guideShape} />
         </div>
         <p
           className={`mt-3 text-[13px] ${
@@ -672,6 +687,16 @@ export function PhotoScreen() {
           >
             <Zap className="h-4 w-4" aria-hidden="true" />
             {autoCapture ? 'Auto-capture: On' : 'Auto-capture: Off'}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setGuideShape((s) => (s === 'oval' ? 'rectangle' : 'oval'))
+            }
+            className="focus-ring flex items-center justify-center gap-2 rounded-btn border border-transparent bg-surface/60 px-4 py-2.5 text-[14px] font-semibold text-ink transition-colors hover:bg-surface/90"
+          >
+            <Scan className="h-4 w-4" aria-hidden="true" />
+            {guideShape === 'oval' ? 'Guide: Oval' : 'Guide: Rectangle'}
           </button>
           <Button onClick={captureFromVideo} disabled={!faceEval.allGood}>
             {faceEval.allGood

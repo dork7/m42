@@ -36,7 +36,7 @@ export const CFG = {
   centerTolY: 0.12, // |cy - centerTargetY| allowed
   centerTargetY: 0.5, // guide is vertically centred
 
-  captureHold: 12, // consecutive all-good detections (~90ms each) before capture
+  captureHold: 16, // consecutive all-good detections (~90ms each) before capture
 
   // --- Face-covering heuristics — see evaluateCoverage. ---
   // Glasses: a decisive tinted-lens reading, OR >= 2 softer frame/lens signals.
@@ -52,14 +52,12 @@ export const CFG = {
   // shifted toward blue / desaturated — and (b) differ substantially from the
   // cheeks, OR the lips are no longer redder than the cheeks. A beard / jaw
   // shadow only makes the area darker while KEEPING skin chroma, so (a) fails.
-  maskBrightDelta: 12, // lower face brighter than cheeks by this (white/surgical)
-  maskBlueShiftMin: 0.018, // rise in blue chromaticity vs cheeks (blue/black/grey)
-  maskRedDropMin: 0.022, // drop in red chromaticity vs cheeks (any non-skin fabric)
-  maskColorDelta: 24, // RGB distance lower-face vs cheeks = a real colour break
-  maskLipRednessRatio: 0.85, // bare lips are at least this much redder than cheeks
-  maskFlatMax: 22, // (unused for now) lower-face luma std-dev = smooth fabric
-
-  // Partial occlusion (a hand / hair covering one side of the face). Compare the
+// Optimized Thresholds & Dynamic Logic
+maskBrightDelta: 24,        // Brightness boost (surgical / white masks)
+maskBlueShiftMin: 0.015,     // Reduced slightly to prevent missing black/dark masks
+maskRedDropMin: 0.022,       // Primary trigger for fabric coverage
+maskColorDelta: 20,          // Distance threshold in RGB
+maskLipRednessRatio: 0.88,   // Slightly tighter bound to avoid false triggers on muted lipsmaskBlueShiftMin: 0.018,
   // left and right halves of the eye–cheek band: on a real frontal face they
   // match; a covering flattens one side (its eye/features vanish) and usually
   // shifts its colour or brightness.
