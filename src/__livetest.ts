@@ -6,6 +6,7 @@
 import { detectFaceInVideo, initFaceDetection } from './lib/faceDetection'
 import {
   CFG,
+  CFG_DEFAULTS,
   createSampleCanvasCtx,
   eulerFromMatrix,
   evaluateCoverage,
@@ -55,6 +56,7 @@ const capCanvas = document.createElement('canvas')
 let streak = 0
 let captured = false
 let autoOn = false
+let coverEnabled = true
 let mirror = true
 let lastDetect = 0
 
@@ -82,6 +84,29 @@ const state: Partial<LiveState> = {}
 
 let frames = 0
 let fpsMark = performance.now()
+
+// Latest raw mask signals (from the [coverage] debug log) for on-screen display.
+let lastMaskSig: Record<string, unknown> | null = null
+{
+  const orig = console.log.bind(console)
+  console.log = (...a: unknown[]) => {
+    if (a[0] === '[coverage]' && a[1] && typeof a[1] === 'object') {
+      const c = a[1] as Record<string, unknown>
+      lastMaskSig = {
+        verdict: c.verdict,
+        maskColor: c.maskColor,
+        blueShift: c.blueShift,
+        redDrop: c.redDrop,
+        lipVsCheek: c.lipRednessVsCheek,
+        sigUnskinlike: c.sigUnskinlike,
+        sigColourBreak: c.sigColourBreak,
+        sigLipsHidden: c.sigLipsHidden,
+        sigBrighter: c.sigBrighter,
+      }
+    }
+    orig(...a)
+  }
+}
 
 function capture() {
   captured = true
@@ -132,16 +157,18 @@ function tick(ts: number) {
       } catch {
         /* ignore */
       }
-      try {
-        coverage = evaluateCoverage(
-          landmarks,
-          video,
-          video.videoWidth,
-          video.videoHeight,
-          sampleCtx,
-        )
-      } catch (e) {
-        console.warn('[livetest] coverage err', e)
+      if (coverEnabled) {
+        try {
+          coverage = evaluateCoverage(
+            landmarks,
+            video,
+            video.videoWidth,
+            video.videoHeight,
+            sampleCtx,
+          )
+        } catch (e) {
+          console.warn('[livetest] coverage err', e)
+        }
       }
     }
 
@@ -192,7 +219,10 @@ function tick(ts: number) {
       boxW: dbox ? +dbox.w.toFixed(3) : null,
       cx: dbox ? +dbox.cx.toFixed(3) : null,
       cy: dbox ? +dbox.cy.toFixed(3) : null,
-      coverage: `${coverage.kind} / ${evaln.coverage.label}`,
+      coverage: coverEnabled
+        ? `${coverage.kind} / ${evaln.coverage.label}`
+        : 'OFF',
+      maskSignals: lastMaskSig,
       light: evaln.light.label,
       pose: evaln.pose.label,
       position: evaln.position.label,
@@ -235,8 +265,69 @@ document.getElementById('flip')!.addEventListener('click', () => {
   video.style.transform = t
   still.style.transform = t
 })
+document.getElementById('cover')!.addEventListener('click', (e) => {
+  coverEnabled = !coverEnabled
+  const b = e.target as HTMLButtonElement
+  b.textContent = coverEnabled ? 'Face-clear check: ON' : 'Face-clear check: OFF'
+  b.classList.toggle('on', coverEnabled)
+})
+
+// --- Live mask-threshold tuning: mutate CFG in place, next frame picks it up ---
+type TuneKey = keyof typeof CFG
+const TUNE: { key: TuneKey; label: string; min: number; max: number; step: number }[] = [
+  { key: 'maskLipRednessRatio', label: 'Lip redness ratio', min: 0.7, max: 1.2, step: 0.01 },
+  { key: 'maskColorDelta', label: 'Colour break (RGB dist)', min: 5, max: 70, step: 1 },
+  { key: 'maskBlueShiftMin', label: 'Blue-shift min', min: 0, max: 0.08, step: 0.001 },
+  { key: 'maskRedDropMin', label: 'Red-drop min', min: 0, max: 0.08, step: 0.001 },
+  { key: 'maskBrightDelta', label: 'Brighter-than-cheek delta', min: 0, max: 40, step: 1 },
+  { key: 'coverageConfirmFrames', label: 'Confirm frames', min: 1, max: 10, step: 1 },
+  { key: 'coverageMinSkinLum', label: 'Min skin luma to judge', min: 10, max: 90, step: 1 },
+]
+const tuneRows = document.getElementById('tuneRows')!
+const tuneDirty = document.getElementById('tuneDirty')!
+const fmt = (n: number) => (n > 0 && n < 1 ? n.toFixed(3) : String(n))
+function refreshDirty() {
+  const d = TUNE.filter((f) => CFG[f.key] !== CFG_DEFAULTS[f.key]).length
+  tuneDirty.textContent = d ? `(${d} changed)` : ''
+}
+for (const f of TUNE) {
+  const row = document.createElement('div')
+  row.className = 'row'
+  const name = document.createElement('span')
+  name.textContent = f.label
+  const input = document.createElement('input')
+  input.type = 'range'
+  input.min = String(f.min)
+  input.max = String(f.max)
+  input.step = String(f.step)
+  input.value = String(CFG[f.key])
+  const val = document.createElement('span')
+  val.className = 'val'
+  val.textContent = fmt(CFG[f.key])
+  input.addEventListener('input', () => {
+    const v = Number(input.value)
+    ;(CFG as Record<string, number>)[f.key] = v
+    val.textContent = fmt(v)
+    refreshDirty()
+  })
+  row.append(name, input, val)
+  tuneRows.appendChild(row)
+}
+document.getElementById('tuneReset')!.addEventListener('click', () => {
+  for (const f of TUNE) (CFG as Record<string, number>)[f.key] = CFG_DEFAULTS[f.key]
+  tuneRows.querySelectorAll('input').forEach((inp, i) => {
+    inp.value = String(CFG[TUNE[i].key])
+    ;(inp.nextElementSibling as HTMLElement).textContent = fmt(CFG[TUNE[i].key])
+  })
+  refreshDirty()
+})
 
 async function main() {
+  try {
+    localStorage.setItem('faceCoverageDebug', '1') // enable [coverage] signal log
+  } catch {
+    /* ignore */
+  }
   verdictEl.textContent = 'loading model…'
   await initFaceDetection()
   verdictEl.textContent = 'requesting camera…'

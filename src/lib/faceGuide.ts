@@ -77,6 +77,11 @@ maskLipRednessRatio: 0.88,   // Slightly tighter bound to avoid false triggers o
   sharpnessMin: 5,
 }
 
+// Snapshot of the shipped defaults. CFG itself is intentionally mutable so the
+// dev tuning panel (MaskTuningPanel) can adjust thresholds at runtime; this
+// keeps a pristine copy to reset back to.
+export const CFG_DEFAULTS: Readonly<typeof CFG> = { ...CFG }
+
 // MediaPipe canonical 478-point face mesh indices, grouped into sampling regions.
 export const COVERAGE_REGIONS = {
   eyeBand: [33, 263, 70, 300, 145, 374, 168],

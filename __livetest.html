@@ -18,7 +18,14 @@
       h3 { margin: 12px 0 4px; }
       .seen span { display: inline-block; margin: 2px 6px 2px 0; padding: 2px 6px; border-radius: 5px; background: #333; }
       .seen span.hit { background: #166534; color: #dcfce7; }
-      button { font: inherit; padding: 6px 12px; margin-right: 8px; border-radius: 6px; border: 0; cursor: pointer; }
+      button { font: inherit; padding: 6px 12px; margin: 0 8px 6px 0; border-radius: 6px; border: 0; cursor: pointer; }
+      button.on { background: #7c2d55; color: #fce7f3; }
+      #tune { margin-top: 10px; border: 1px solid #444; border-radius: 8px; padding: 8px 10px; }
+      #tune h3 { margin-top: 0; }
+      #tune .row { display: grid; grid-template-columns: 1fr 160px 46px; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }
+      #tune input[type=range] { width: 100%; accent-color: #ec4899; }
+      #tune .val { text-align: right; color: #fbbf24; }
+      #tune .dirty { color: #f87171; }
     </style>
   </head>
   <body>
@@ -29,6 +36,7 @@
         <div>
           <button id="resume">Resume camera</button>
           <button id="auto">Auto-capture: OFF</button>
+          <button id="cover" class="on">Face-clear check: ON</button>
           <button id="flip">Toggle mirror</button>
         </div>
         <div class="big" id="verdict">starting…</div>
@@ -36,6 +44,11 @@
       </div>
       <div class="col">
         <pre id="panel"></pre>
+        <div id="tune">
+          <h3>Mask detection tuning <span id="tuneDirty" class="dirty"></span></h3>
+          <div id="tuneRows"></div>
+          <button id="tuneReset">Reset to defaults</button>
+        </div>
         <h3>Cases observed</h3>
         <div class="seen" id="seen"></div>
       </div>

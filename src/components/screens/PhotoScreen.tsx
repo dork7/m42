@@ -1,4 +1,4 @@
-import { AlertTriangle, Camera, ImageUp, Scan, Zap } from 'lucide-react'
+import { AlertTriangle, Camera, ImageUp } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useFlow } from '../../context/FlowContext'
 import {
@@ -27,11 +27,20 @@ import {
   type FaceEvaluation,
 } from '../../lib/faceGuide'
 import { FaceGuideOverlay, type GuideShape } from '../FaceGuideOverlay'
+import { analyzeImageWithAI, isLocalHost } from '../../api/visionCheck'
+import { CameraSettings } from '../CameraSettings'
 import { FaceStatusChips } from '../FaceStatusChips'
 import { ScanningOverlay, ValidatingBar } from '../ScanningOverlay'
 import { Button } from '../ui/Button'
 
 type Mode = 'choose' | 'camera' | 'preview'
+
+// The dev-only "AI CHECK" button relies on the Vite `/vision-api` proxy, which
+// only exists when serving from localhost.
+const CAN_AI_CHECK = isLocalHost()
+
+type AiCheck = { status: 'idle' | 'loading' | 'done' | 'error'; text: string }
+const AI_CHECK_IDLE: AiCheck = { status: 'idle', text: '' }
 
 const INITIAL_EVALUATION: FaceEvaluation = {
   faceFound: false,
@@ -100,6 +109,7 @@ export function PhotoScreen() {
   const blurOnRef = useRef(false)
   const blurReadyRef = useRef(false)
   const autoCaptureRef = useRef(false)
+  const coverageEnabledRef = useRef(true)
 
   const [mode, setMode] = useState<Mode>(photo ? 'preview' : 'choose')
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -122,6 +132,14 @@ export function PhotoScreen() {
       return 'rectangle'
     }
   })
+  const [coverageEnabled, setCoverageEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('photoCoverageEnabled') !== '0'
+    } catch {
+      return true
+    }
+  })
+  const [aiCheck, setAiCheck] = useState<AiCheck>(AI_CHECK_IDLE)
 
   const getSampleCtx = useCallback(() => {
     if (!sampleCtxRef.current) sampleCtxRef.current = createSampleCanvasCtx()
@@ -190,6 +208,16 @@ export function PhotoScreen() {
       /* ignore */
     }
   }, [guideShape])
+
+  useEffect(() => {
+    coverageEnabledRef.current = coverageEnabled
+    resetCoverage()
+    try {
+      localStorage.setItem('photoCoverageEnabled', coverageEnabled ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }, [coverageEnabled, resetCoverage])
 
   useEffect(() => {
     if (!blurBackground || blurReadyRef.current) return
@@ -289,13 +317,15 @@ export function PhotoScreen() {
             box,
             getSampleCtx(),
           )
-          coverage = evaluateCoverage(
-            landmarks,
-            img,
-            img.naturalWidth,
-            img.naturalHeight,
-            getSampleCtx(),
-          )
+          if (coverageEnabledRef.current) {
+            coverage = evaluateCoverage(
+              landmarks,
+              img,
+              img.naturalWidth,
+              img.naturalHeight,
+              getSampleCtx(),
+            )
+          }
         } catch {
           brightness = null
         }
@@ -374,15 +404,17 @@ export function PhotoScreen() {
             brightness = null
           }
           try {
-            coverage = confirmCoverage(
-              evaluateCoverage(
-                landmarks,
-                video,
-                video.videoWidth,
-                video.videoHeight,
-                getSampleCtx(),
-              ),
-            )
+            coverage = coverageEnabledRef.current
+              ? confirmCoverage(
+                  evaluateCoverage(
+                    landmarks,
+                    video,
+                    video.videoWidth,
+                    video.videoHeight,
+                    getSampleCtx(),
+                  ),
+                )
+              : UNKNOWN_COVERAGE
           } catch (err) {
             try {
               if (localStorage.getItem('faceCoverageDebug') === '1') {
@@ -544,8 +576,23 @@ export function PhotoScreen() {
     setPhoto(null)
     setMode('choose')
     setCameraError(null)
+    setAiCheck(AI_CHECK_IDLE)
     resetTracking()
   }
+
+  const runAiCheck = useCallback(async () => {
+    if (!photo) return
+    setAiCheck({ status: 'loading', text: '' })
+    try {
+      const res = await analyzeImageWithAI(photo)
+      setAiCheck({ status: 'done', text: res.text })
+    } catch (err) {
+      setAiCheck({
+        status: 'error',
+        text: err instanceof Error ? err.message : 'AI check failed',
+      })
+    }
+  }, [photo])
 
   const canContinue = faceEval.allGood && detectorReady && !isValidating
   const photoRejected = !isValidating && detectorReady && !faceEval.allGood
@@ -569,7 +616,7 @@ export function PhotoScreen() {
             light={faceEval.light}
             pose={faceEval.pose}
             position={faceEval.position}
-            coverage={faceEval.coverage}
+            coverage={coverageEnabled ? faceEval.coverage : null}
           />
         )}
         <div
@@ -627,6 +674,28 @@ export function PhotoScreen() {
             </>
           )}
         </div>
+
+        {CAN_AI_CHECK && (
+          <div className="mt-3 flex w-full max-w-xs flex-col gap-2">
+            <Button
+              variant="secondary"
+              onClick={runAiCheck}
+              disabled={aiCheck.status === 'loading'}
+            >
+              {aiCheck.status === 'loading' ? 'Checking with AI…' : 'AI CHECK'}
+            </Button>
+            {aiCheck.status === 'done' && (
+              <div className="max-h-64 overflow-auto whitespace-pre-wrap rounded-panel border border-berry/25 bg-surface/50 p-3 text-left text-[13px] text-ink">
+                {aiCheck.text}
+              </div>
+            )}
+            {aiCheck.status === 'error' && (
+              <p className="text-left text-[13px] text-berry" role="alert">
+                {aiCheck.text}
+              </p>
+            )}
+          </div>
+        )}
       </div>
     )
   }
@@ -642,7 +711,7 @@ export function PhotoScreen() {
           light={faceEval.light}
           pose={faceEval.pose}
           position={faceEval.position}
-          coverage={faceEval.coverage}
+          coverage={coverageEnabled ? faceEval.coverage : null}
         />
         <div
           ref={previewContainerRef}
@@ -675,29 +744,6 @@ export function PhotoScreen() {
         </p>
         <canvas ref={canvasRef} className="hidden" />
         <div className="mt-6 flex w-full max-w-xs flex-col gap-3">
-          <button
-            type="button"
-            onClick={() => setAutoCapture((v) => !v)}
-            aria-pressed={autoCapture}
-            className={`focus-ring flex items-center justify-center gap-2 rounded-btn px-4 py-2.5 text-[14px] font-semibold transition-colors ${
-              autoCapture
-                ? 'border-[1.5px] border-berry bg-berry-soft text-berry'
-                : 'border border-transparent bg-surface/60 text-ink hover:bg-surface/90'
-            }`}
-          >
-            <Zap className="h-4 w-4" aria-hidden="true" />
-            {autoCapture ? 'Auto-capture: On' : 'Auto-capture: Off'}
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              setGuideShape((s) => (s === 'oval' ? 'rectangle' : 'oval'))
-            }
-            className="focus-ring flex items-center justify-center gap-2 rounded-btn border border-transparent bg-surface/60 px-4 py-2.5 text-[14px] font-semibold text-ink transition-colors hover:bg-surface/90"
-          >
-            <Scan className="h-4 w-4" aria-hidden="true" />
-            {guideShape === 'oval' ? 'Guide: Oval' : 'Guide: Rectangle'}
-          </button>
           <Button onClick={captureFromVideo} disabled={!faceEval.allGood}>
             {faceEval.allGood
               ? 'Take the photo'
@@ -716,6 +762,16 @@ export function PhotoScreen() {
             Cancel
           </Button>
         </div>
+        <CameraSettings
+          autoCapture={autoCapture}
+          onToggleAutoCapture={() => setAutoCapture((v) => !v)}
+          guideShape={guideShape}
+          onCycleGuideShape={() =>
+            setGuideShape((s) => (s === 'oval' ? 'rectangle' : 'oval'))
+          }
+          coverageEnabled={coverageEnabled}
+          onToggleCoverage={() => setCoverageEnabled((v) => !v)}
+        />
         <p className="mt-3 text-center text-[12px] text-ink-muted">
           Framing &amp; coverage guidance only — not a liveness check.
         </p>
