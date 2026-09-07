@@ -160,7 +160,7 @@ const NO_FACE: FaceEvaluation = {
   coverage: { level: 'bad', label: 'No Face' },
   status: 'no_face',
   allGood: false,
-  message: 'Position your face in the circle',
+  message: 'Position your face in the frame',
 }
 
 export const UNKNOWN_COVERAGE: CoverageResult = {
@@ -684,7 +684,7 @@ function evaluatePosition(box: FaceBox): {
 }
 
 const POSITION_MESSAGES: Record<FaceStatus, string> = {
-  no_face: 'Position your face in the circle',
+  no_face: 'Position your face in the frame',
   covered: 'Uncover your face',
   blurry: 'Photo looks blurry — hold steady and retake',
   too_far: 'Move a little closer',

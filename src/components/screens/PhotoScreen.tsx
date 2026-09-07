@@ -41,7 +41,7 @@ const INITIAL_EVALUATION: FaceEvaluation = {
   coverage: { level: 'bad', label: 'No Face' },
   status: 'no_face',
   allGood: false,
-  message: 'Position your face in the circle',
+  message: 'Position your face in the frame',
 }
 
 const PORTRAIT_CAMERA_CONSTRAINTS: MediaStreamConstraints = {
@@ -85,6 +85,7 @@ export function PhotoScreen() {
   const rafRef = useRef<number | null>(null)
   const lastDetectRef = useRef(0)
   const capturedRef = useRef(false)
+  const goodStreakRef = useRef(0)
   const sampleCtxRef = useRef<CanvasRenderingContext2D | null>(null)
   const evalStatusRef = useRef<string>(INITIAL_EVALUATION.status)
   const coverageStableRef = useRef<CoverageResult>(UNKNOWN_COVERAGE)
@@ -184,6 +185,7 @@ export function PhotoScreen() {
 
   const resetTracking = useCallback(() => {
     capturedRef.current = false
+    goodStreakRef.current = 0
     evalStatusRef.current = INITIAL_EVALUATION.status
     resetCoverage()
     setFaceEval(INITIAL_EVALUATION)
@@ -369,6 +371,14 @@ export function PhotoScreen() {
         if (signature !== evalStatusRef.current) {
           evalStatusRef.current = signature
           setFaceEval(next)
+        }
+
+        // Auto-capture: fire once every check has held for CFG.captureHold
+        // consecutive detections (~90ms each). Any failing check resets the
+        // streak, so a single noisy frame can't trigger it.
+        goodStreakRef.current = next.allGood ? goodStreakRef.current + 1 : 0
+        if (goodStreakRef.current >= CFG.captureHold && !capturedRef.current) {
+          void captureFromVideo()
         }
       }
 
@@ -643,8 +653,8 @@ export function PhotoScreen() {
                 ? 'Background blur: On'
                 : 'Blur background'}
           </button>
-          <Button onClick={captureFromVideo}>
-            Take a photo
+          <Button onClick={captureFromVideo} disabled={!faceEval.allGood}>
+            {faceEval.allGood ? 'Take the photo now' : 'Auto-capturing when ready'}
           </Button>
           <Button
             variant="secondary"
