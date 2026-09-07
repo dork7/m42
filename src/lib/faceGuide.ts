@@ -14,7 +14,7 @@ export const DISPLAY_ASPECT = 3 / 4
 // the frame height, centred. All coords/fractions are of the VISIBLE frame.
 export const CFG = {
   // --- Lighting: mean luma (0–255) of the face region (sampleFaceBrightness). ---
-  lightGoodMin: 90,
+  lightGoodMin: 100,
   lightGoodMax: 150,
   lightOkMin: 55,
   lightOkMax: 222,
@@ -36,7 +36,7 @@ export const CFG = {
   centerTolY: 0.12, // |cy - centerTargetY| allowed
   centerTargetY: 0.5, // guide is vertically centred
 
-  captureHold: 10, // consecutive all-good detections (~90ms each) before capture
+  captureHold: 12, // consecutive all-good detections (~90ms each) before capture
 
   // --- Face-covering heuristics — see evaluateCoverage. ---
   // Glasses: a decisive tinted-lens reading, OR >= 2 softer frame/lens signals.
@@ -53,10 +53,10 @@ export const CFG = {
   // cheeks, OR the lips are no longer redder than the cheeks. A beard / jaw
   // shadow only makes the area darker while KEEPING skin chroma, so (a) fails.
   maskBrightDelta: 12, // lower face brighter than cheeks by this (white/surgical)
-  maskBlueShiftMin: 0.018, // rise in blue chromaticity vs cheeks (blue/black/grey)
-  maskRedDropMin: 0.022, // drop in red chromaticity vs cheeks (any non-skin fabric)
-  maskColorDelta: 24, // RGB distance lower-face vs cheeks = a real colour break
-  maskLipRednessRatio: 1.04, // bare lips are at least this much redder than cheeks
+  maskBlueShiftMin: 0.03, // rise in blue chromaticity vs cheeks (blue/black/grey)
+  maskRedDropMin: 0.04, // drop in red chromaticity vs cheeks (any non-skin fabric)
+  maskColorDelta: 45, // RGB distance lower-face vs cheeks = a real colour break
+  maskLipRednessRatio: 0.85,// 1.04, // bare lips are at least this much redder than cheeks
   maskFlatMax: 22, // (unused for now) lower-face luma std-dev = smooth fabric
 
   // Partial occlusion (a hand / hair covering one side of the face). Compare the

@@ -54,6 +54,7 @@ const capCanvas = document.createElement('canvas')
 
 let streak = 0
 let captured = false
+let autoOn = false
 let mirror = true
 let lastDetect = 0
 
@@ -162,7 +163,7 @@ function tick(ts: number) {
         : null
 
     streak = evaln.allGood ? streak + 1 : 0
-    if (streak >= CFG.captureHold && !captured) capture()
+    if (autoOn && streak >= CFG.captureHold && !captured) capture()
 
     // latch observed cases
     if (evaln.status === 'no_face') seen.no_face = true
@@ -220,6 +221,13 @@ document.getElementById('resume')!.addEventListener('click', () => {
   streak = 0
   still.style.display = 'none'
   video.style.display = 'block'
+})
+document.getElementById('auto')!.addEventListener('click', (e) => {
+  autoOn = !autoOn
+  streak = 0
+  ;(e.target as HTMLButtonElement).textContent = autoOn
+    ? 'Auto-capture: ON'
+    : 'Auto-capture: OFF'
 })
 document.getElementById('flip')!.addEventListener('click', () => {
   mirror = !mirror

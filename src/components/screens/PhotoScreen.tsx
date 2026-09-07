@@ -1,4 +1,4 @@
-import { AlertTriangle, Camera, ImageUp, Sparkles } from 'lucide-react'
+import { AlertTriangle, Camera, ImageUp, Zap } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useFlow } from '../../context/FlowContext'
 import {
@@ -99,6 +99,7 @@ export function PhotoScreen() {
   const hasMaskRef = useRef(false)
   const blurOnRef = useRef(false)
   const blurReadyRef = useRef(false)
+  const autoCaptureRef = useRef(false)
 
   const [mode, setMode] = useState<Mode>(photo ? 'preview' : 'choose')
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -106,7 +107,14 @@ export function PhotoScreen() {
   const [detectorReady, setDetectorReady] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
   const [blurBackground, setBlurBackground] = useState(false)
-  const [blurLoading, setBlurLoading] = useState(false)
+  const [, setBlurLoading] = useState(false)
+  const [autoCapture, setAutoCapture] = useState(() => {
+    try {
+      return localStorage.getItem('photoAutoCapture') === '1'
+    } catch {
+      return false
+    }
+  })
 
   const getSampleCtx = useCallback(() => {
     if (!sampleCtxRef.current) sampleCtxRef.current = createSampleCanvasCtx()
@@ -155,6 +163,18 @@ export function PhotoScreen() {
     blurOnRef.current = blurBackground
     if (!blurBackground) hasMaskRef.current = false
   }, [blurBackground])
+
+  useEffect(() => {
+    autoCaptureRef.current = autoCapture
+    // Re-arm the streak so toggling on mid-session doesn't fire instantly on a
+    // stale count, and toggling off leaves a clean slate.
+    goodStreakRef.current = 0
+    try {
+      localStorage.setItem('photoAutoCapture', autoCapture ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }, [autoCapture])
 
   useEffect(() => {
     if (!blurBackground || blurReadyRef.current) return
@@ -373,11 +393,15 @@ export function PhotoScreen() {
           setFaceEval(next)
         }
 
-        // Auto-capture: fire once every check has held for CFG.captureHold
-        // consecutive detections (~90ms each). Any failing check resets the
-        // streak, so a single noisy frame can't trigger it.
+        // Auto-capture (opt-in): once enabled, fire after every check has held
+        // for CFG.captureHold consecutive detections (~90ms each). Any failing
+        // check resets the streak, so a single noisy frame can't trigger it.
         goodStreakRef.current = next.allGood ? goodStreakRef.current + 1 : 0
-        if (goodStreakRef.current >= CFG.captureHold && !capturedRef.current) {
+        if (
+          autoCaptureRef.current &&
+          goodStreakRef.current >= CFG.captureHold &&
+          !capturedRef.current
+        ) {
           void captureFromVideo()
         }
       }
@@ -638,23 +662,23 @@ export function PhotoScreen() {
         <div className="mt-6 flex w-full max-w-xs flex-col gap-3">
           <button
             type="button"
-            onClick={() => setBlurBackground((v) => !v)}
-            aria-pressed={blurBackground}
+            onClick={() => setAutoCapture((v) => !v)}
+            aria-pressed={autoCapture}
             className={`focus-ring flex items-center justify-center gap-2 rounded-btn px-4 py-2.5 text-[14px] font-semibold transition-colors ${
-              blurBackground
+              autoCapture
                 ? 'border-[1.5px] border-berry bg-berry-soft text-berry'
                 : 'border border-transparent bg-surface/60 text-ink hover:bg-surface/90'
             }`}
           >
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
-            {blurLoading
-              ? 'Loading blur…'
-              : blurBackground
-                ? 'Background blur: On'
-                : 'Blur background'}
+            <Zap className="h-4 w-4" aria-hidden="true" />
+            {autoCapture ? 'Auto-capture: On' : 'Auto-capture: Off'}
           </button>
           <Button onClick={captureFromVideo} disabled={!faceEval.allGood}>
-            {faceEval.allGood ? 'Take the photo now' : 'Auto-capturing when ready'}
+            {faceEval.allGood
+              ? 'Take the photo'
+              : autoCapture
+                ? 'Auto-capturing when ready'
+                : 'Line up the checks first'}
           </Button>
           <Button
             variant="secondary"
