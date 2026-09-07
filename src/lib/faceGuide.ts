@@ -53,10 +53,10 @@ export const CFG = {
   // cheeks, OR the lips are no longer redder than the cheeks. A beard / jaw
   // shadow only makes the area darker while KEEPING skin chroma, so (a) fails.
   maskBrightDelta: 12, // lower face brighter than cheeks by this (white/surgical)
-  maskBlueShiftMin: 0.03, // rise in blue chromaticity vs cheeks (blue/black/grey)
-  maskRedDropMin: 0.04, // drop in red chromaticity vs cheeks (any non-skin fabric)
-  maskColorDelta: 45, // RGB distance lower-face vs cheeks = a real colour break
-  maskLipRednessRatio: 0.85,// 1.04, // bare lips are at least this much redder than cheeks
+  maskBlueShiftMin: 0.018, // rise in blue chromaticity vs cheeks (blue/black/grey)
+  maskRedDropMin: 0.022, // drop in red chromaticity vs cheeks (any non-skin fabric)
+  maskColorDelta: 24, // RGB distance lower-face vs cheeks = a real colour break
+  maskLipRednessRatio: 0.85, // bare lips are at least this much redder than cheeks
   maskFlatMax: 22, // (unused for now) lower-face luma std-dev = smooth fabric
 
   // Partial occlusion (a hand / hair covering one side of the face). Compare the
