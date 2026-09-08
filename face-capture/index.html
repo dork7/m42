@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Face Capture</title>
+  <style>
+    :root {
+      --berry: #c2255c;
+      --berry-soft: #ffe3ee;
+      --ink: #1f1430;
+      --ink-muted: #6b6478;
+      --surface: #ffffff;
+      --bg: #f6f2f7;
+      --good: #10b981;
+      --warn: #f59e0b;
+      --bad: #f43f5e;
+      color-scheme: light dark;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --berry: #ff6fa5;
+        --berry-soft: #3a1b2b;
+        --ink: #f4eef8;
+        --ink-muted: #a99fb5;
+        --surface: #241b31;
+        --bg: #160f1f;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .app { width: 100%; max-width: 340px; display: flex; flex-direction: column; align-items: center; }
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1.15;
+      margin: 0;
+      text-align: center;
+    }
+    .sub { margin: 8px 0 0; text-align: center; color: var(--ink-muted); font-size: 15px; }
+    [hidden] { display: none !important; }
+
+    /* choose screen */
+    .choices { margin-top: 24px; display: grid; gap: 16px; width: 100%; }
+    .choice {
+      appearance: none;
+      border: 1px solid color-mix(in srgb, var(--berry) 25%, transparent);
+      background: color-mix(in srgb, var(--surface) 70%, transparent);
+      backdrop-filter: blur(8px);
+      border-radius: 18px;
+      padding: 28px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--ink);
+      transition: transform .12s ease;
+    }
+    .choice:hover { transform: scale(1.01); }
+    .choice svg { width: 32px; height: 32px; stroke: var(--berry); }
+    .error { margin-top: 16px; color: var(--berry); text-align: center; font-size: 13px; }
+
+    /* chips */
+    .chips {
+      margin-top: 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      width: 100%;
+      max-width: 300px;
+    }
+    .chip {
+      border-radius: 10px;
+      padding: 6px 8px;
+      text-align: center;
+      line-height: 1.15;
+      color: #fff;
+      background: var(--ink-muted);
+    }
+    .chip.span-2 { grid-column: span 2; }
+    .chip[data-level="good"] { background: color-mix(in srgb, var(--good) 90%, black); }
+    .chip[data-level="warn"] { background: color-mix(in srgb, var(--warn) 90%, black); }
+    .chip[data-level="bad"]  { background: color-mix(in srgb, var(--bad) 90%, black); }
+    .chip-title { font-size: 11px; font-weight: 600; opacity: .95; }
+    .chip-label { font-size: 12px; font-weight: 800; }
+
+    /* camera / preview frame */
+    .frame {
+      position: relative;
+      margin-top: 12px;
+      width: 100%;
+      max-width: 280px;
+      aspect-ratio: 3 / 4;
+      overflow: hidden;
+      border-radius: 24px;
+      transform: translateZ(0);
+      contain: paint;
+      background: #000;
+    }
+    .frame.bordered { border: 2px solid var(--berry); box-shadow: 0 0 24px color-mix(in srgb, var(--berry) 45%, transparent); }
+    video, .frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    video { transform: scaleX(-1); }
+
+    /* guide overlay */
+    .guide { position: absolute; inset: 0; pointer-events: none; }
+    .guide .scrim { position: absolute; background: rgba(0,0,0,.28); }
+    .guide[data-shape="oval"] .rect-guide { display: none; }
+    .guide[data-shape="rectangle"] .oval-guide { display: none; }
+
+    .rect-guide .scrim-top    { inset: 0 0 auto 0; height: 20.75%; }
+    .rect-guide .scrim-bottom { inset: auto 0 0 0; height: 20.75%; }
+    .rect-guide .scrim-left   { left: 0; top: 20.75%; bottom: 20.75%; width: 11%; }
+    .rect-guide .scrim-right  { right: 0; top: 20.75%; bottom: 20.75%; width: 11%; }
+    .rect-window {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 78%;
+      aspect-ratio: 1 / 1;
+      border-radius: 20px;
+    }
+    .bracket {
+      position: absolute;
+      width: 32px;
+      height: 32px;
+      border: 3px solid rgba(255,255,255,.7);
+      transition: border-color .2s ease;
+    }
+    .guide[data-valid="true"] .bracket { border-color: var(--berry); }
+    .guide[data-valid="true"] .oval-ellipse { stroke: var(--berry); }
+    .bracket.tl { left: 0; top: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 18px; }
+    .bracket.tr { right: 0; top: 0; border-left: 0; border-bottom: 0; border-top-right-radius: 18px; }
+    .bracket.bl { left: 0; bottom: 0; border-right: 0; border-top: 0; border-bottom-left-radius: 18px; }
+    .bracket.br { right: 0; bottom: 0; border-left: 0; border-top: 0; border-bottom-right-radius: 18px; }
+    .oval-guide { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+    /* messages + buttons */
+    .message {
+      margin-top: 12px;
+      font-size: 13px;
+      text-align: center;
+      color: var(--berry);
+      min-height: 1.2em;
+    }
+    .message[data-ok="true"] { color: var(--ink-muted); }
+    .preview-message {
+      margin-top: 12px;
+      font-size: 13px;
+      text-align: center;
+      color: var(--ink-muted);
+      max-width: 280px;
+    }
+    .preview-message[data-state="bad"] { color: var(--berry); }
+
+    .actions { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; }
+    button.btn {
+      appearance: none;
+      border: 0;
+      border-radius: 12px;
+      padding: 13px 16px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      background: var(--berry);
+      color: #fff;
+      transition: opacity .15s ease;
+    }
+    button.btn.secondary {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid color-mix(in srgb, var(--berry) 35%, transparent);
+    }
+    button.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* settings */
+    .settings {
+      margin-top: 16px;
+      width: 100%;
+      max-width: 300px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--surface) 60%, transparent);
+      border: 1px solid color-mix(in srgb, var(--berry) 18%, transparent);
+    }
+    .settings label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-muted);
+      cursor: pointer;
+    }
+    .hint { margin-top: 12px; font-size: 12px; text-align: center; color: var(--ink-muted); }
+    canvas.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Time for your close-up</h1>
+
+    <!-- ── Choose ─────────────────────────────────────────── -->
+    <section id="screen-choose">
+      <p class="sub">Natural light, no filters, face centered — this helps us read your skin accurately.</p>
+      <p id="camera-error" class="error" role="alert" hidden></p>
+      <div class="choices">
+        <button type="button" id="start-btn" class="choice">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+          <span>Take a photo</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ── Camera ─────────────────────────────────────────── -->
+    <section id="screen-camera" hidden>
+      <div class="chips">
+        <div class="chip" id="chip-light"><div class="chip-title">Lighting</div><div class="chip-label">—</div></div>
+        <div class="chip" id="chip-pose"><div class="chip-title">Look Straight</div><div class="chip-label">No Face</div></div>
+        <div class="chip" id="chip-position"><div class="chip-title">Face Position</div><div class="chip-label">No Face</div></div>
+        <div class="chip" id="chip-coverage"><div class="chip-title">Face Clear</div><div class="chip-label">No Face</div></div>
+      </div>
+
+      <div class="frame">
+        <video id="video" autoplay muted playsinline></video>
+        <div class="guide" id="guide" data-shape="rectangle" data-valid="false">
+          <div class="rect-guide">
+            <div class="scrim scrim-top"></div>
+            <div class="scrim scrim-bottom"></div>
+            <div class="scrim scrim-left"></div>
+            <div class="scrim scrim-right"></div>
+            <div class="rect-window">
+              <div class="bracket tl"></div>
+              <div class="bracket tr"></div>
+              <div class="bracket bl"></div>
+              <div class="bracket br"></div>
+            </div>
+          </div>
+          <svg class="oval-guide" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+            <defs>
+              <mask id="oval-mask">
+                <rect width="300" height="400" fill="white"/>
+                <ellipse cx="150" cy="200" rx="117" ry="152" fill="black"/>
+              </mask>
+            </defs>
+            <rect width="300" height="400" fill="rgba(0,0,0,0.28)" mask="url(#oval-mask)"/>
+            <ellipse class="oval-ellipse" cx="150" cy="200" rx="117" ry="152" fill="none"
+                     stroke="rgba(255,255,255,0.75)" stroke-width="3" stroke-dasharray="10 8"/>
+          </svg>
+        </div>
+      </div>
+
+      <p class="message" id="message" data-ok="false">Loading face detection…</p>
+      <canvas id="capture-canvas" class="hidden"></canvas>
+
+      <div class="actions">
+        <button type="button" id="take-btn" class="btn" disabled>Line up the checks first</button>
+        <button type="button" id="cancel-btn" class="btn secondary">Cancel</button>
+      </div>
+
+      <div class="settings">
+        <label>Auto-capture when ready
+          <input type="checkbox" id="opt-autocapture" />
+        </label>
+        <label>Oval guide
+          <input type="checkbox" id="opt-guideshape" />
+        </label>
+        <label>Face-covering check
+          <input type="checkbox" id="opt-coverage" checked />
+        </label>
+      </div>
+      <p class="hint">Framing &amp; coverage guidance only — not a liveness check.</p>
+    </section>
+
+    <!-- ── Preview ────────────────────────────────────────── -->
+    <section id="screen-preview" hidden>
+      <p class="sub">Natural light, no filters, face centered.</p>
+      <div class="frame bordered">
+        <img id="photo" alt="Captured face photo" />
+      </div>
+      <p class="preview-message" id="preview-message" data-state="checking">Checking your photo…</p>
+      <p class="hint">Your photo stays in your browser — nothing is uploaded.</p>
+      <div class="actions">
+        <button type="button" id="retake-btn" class="btn secondary">Retake</button>
+      </div>
+    </section>
+  </div>
+
+  <!--
+    Runs straight from file:// — no server, no build step. Needs an internet
+    connection: MediaPipe (runtime + WASM + model) loads from a CDN.
+
+    The inline module below imports the ESM runtime cross-origin (allowed from
+    file://), then injects face-capture.js as a *classic* script — an external
+    `<script type="module" src>` is CORS-blocked on file://, a classic one isn't.
+  -->
+  <script type="module">
+    import { FaceLandmarker, FilesetResolver }
+      from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs'
+    window.__mpVision = { FaceLandmarker, FilesetResolver }
+    const s = document.createElement('script')
+    s.src = './face-capture.js'
+    document.head.appendChild(s)
+  </script>
+</body>
+</html>
