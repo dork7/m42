@@ -560,16 +560,10 @@ export function evaluateCoverage(
   const sigLipsHidden =
     !!lips && lipRedness < cheekRedness * CFG.maskLipRednessRatio
 
-  // Beard vs. fabric: a beard is far noisier than skin; a mask is a smooth
-  // surface. Compare the lower face to the *smoother* of forehead / cheeks —
-  // an ageing forehead is itself creased, so cheeks are the steadier ruler.
-  const cheekStdDev =
-    cheeks.reduce((s, x) => s + x.stdDev, 0) / cheeks.length
-  const skinStdDev = Math.min(forehead.stdDev, cheekStdDev)
   const beardTexture =
     !!lowerFace &&
     lowerFace.stdDev >
-      Math.max(CFG.maskBeardTextureMin, skinStdDev * CFG.maskBeardTextureRatio)
+      Math.max(CFG.maskBeardTextureMin, forehead.stdDev * CFG.maskBeardTextureRatio)
 
   const mask =
     !!lowerFace && notBeard && !beardTexture && (sigColourBreak || sigLipsHidden)
