@@ -58,6 +58,11 @@ maskBlueShiftMin: 0.015,     // Reduced slightly to prevent missing black/dark m
 maskRedDropMin: 0.022,       // Primary trigger for fabric coverage
 maskColorDelta: 20,          // Distance threshold in RGB
 maskLipRednessRatio: 0.88,   // Slightly tighter bound to avoid false triggers on muted lipsmaskBlueShiftMin: 0.018,
+  // A grey/white beard is chromatically close to a pale mask, but far more
+  // textured than skin. Treat a lower face much noisier than the forehead as
+  // facial hair, not fabric.
+  maskBeardTextureRatio: 1.5,
+  maskBeardTextureMin: 18,
   // left and right halves of the eye–cheek band: on a real frontal face they
   // match; a covering flattens one side (its eye/features vanish) and usually
   // shifts its colour or brightness.
@@ -555,7 +560,19 @@ export function evaluateCoverage(
   const sigLipsHidden =
     !!lips && lipRedness < cheekRedness * CFG.maskLipRednessRatio
 
-  const mask = !!lowerFace && notBeard && (sigColourBreak || sigLipsHidden)
+  // Beard vs. fabric: a beard is far noisier than skin; a mask is a smooth
+  // surface. Compare the lower face to the *smoother* of forehead / cheeks —
+  // an ageing forehead is itself creased, so cheeks are the steadier ruler.
+  const cheekStdDev =
+    cheeks.reduce((s, x) => s + x.stdDev, 0) / cheeks.length
+  const skinStdDev = Math.min(forehead.stdDev, cheekStdDev)
+  const beardTexture =
+    !!lowerFace &&
+    lowerFace.stdDev >
+      Math.max(CFG.maskBeardTextureMin, skinStdDev * CFG.maskBeardTextureRatio)
+
+  const mask =
+    !!lowerFace && notBeard && !beardTexture && (sigColourBreak || sigLipsHidden)
 
   // --- Partial occlusion: a hand / hair over one side of the face ---
   // On a frontal face the left and right halves of the eye–cheek band match:

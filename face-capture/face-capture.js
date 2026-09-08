@@ -649,7 +649,7 @@ function opt(key, fallback) {
 
 let autoCapture = opt('photoAutoCapture', '0') === '1'
 let guideShape = opt('photoGuideShape', 'rectangle') === 'oval' ? 'oval' : 'rectangle'
-let coverageEnabled = opt('photoCoverageEnabled', '1') !== '0'
+let coverageEnabled = opt('photoCoverageEnabled', '0') === '1'
 
 function persist(key, value) {
   try {
