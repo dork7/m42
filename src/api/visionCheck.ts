@@ -3,9 +3,9 @@
 // vite.config.ts), which adds the Cookie header and avoids CORS.
 
 const VISION_URL = '/vision-api/analyze'
-const DEFAULT_PROMPT =
-  'Analyze this image, check if the image of the person is centered'
-const VISION_MODEL = 'ornith-1.0-9b-q4'
+export const DEFAULT_PROMPT =
+  'Analyze this image, check if the image of the person is centered, no light issues,'
+export const DEFAULT_MODEL = 'ornith-1.0-9b-q4'
 
 export type VisionCheckResult = {
   /** Best-effort human-readable text pulled from the response. */
@@ -59,12 +59,13 @@ function pickText(raw: unknown): string {
 export async function analyzeImageWithAI(
   photoDataUrl: string,
   prompt: string = DEFAULT_PROMPT,
+  model: string = DEFAULT_MODEL,
 ): Promise<VisionCheckResult> {
   const blob = await dataUrlToBlob(photoDataUrl)
   const form = new FormData()
   form.append('image', blob, 'capture.jpg')
-  form.append('prompt', prompt)
-  form.append('model', VISION_MODEL)
+  form.append('prompt', prompt.trim() || DEFAULT_PROMPT)
+  form.append('model', model.trim() || DEFAULT_MODEL)
 
   // The local model can be slow (cold start / large model), so give it room
   // but don't let the UI hang forever.

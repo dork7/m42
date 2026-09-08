@@ -27,9 +27,15 @@ import {
   type FaceEvaluation,
 } from '../../lib/faceGuide'
 import { FaceGuideOverlay, type GuideShape } from '../FaceGuideOverlay'
-import { analyzeImageWithAI, isLocalHost } from '../../api/visionCheck'
+import {
+  analyzeImageWithAI,
+  DEFAULT_MODEL,
+  DEFAULT_PROMPT,
+  isLocalHost,
+} from '../../api/visionCheck'
 import { CameraSettings } from '../CameraSettings'
 import { FaceStatusChips } from '../FaceStatusChips'
+import { MarkdownLite } from '../MarkdownLite'
 import { ScanningOverlay, ValidatingBar } from '../ScanningOverlay'
 import { Button } from '../ui/Button'
 
@@ -140,6 +146,8 @@ export function PhotoScreen() {
     }
   })
   const [aiCheck, setAiCheck] = useState<AiCheck>(AI_CHECK_IDLE)
+  const [aiPrompt, setAiPrompt] = useState(DEFAULT_PROMPT)
+  const [aiModel, setAiModel] = useState(DEFAULT_MODEL)
 
   const getSampleCtx = useCallback(() => {
     if (!sampleCtxRef.current) sampleCtxRef.current = createSampleCanvasCtx()
@@ -584,7 +592,7 @@ export function PhotoScreen() {
     if (!photo) return
     setAiCheck({ status: 'loading', text: '' })
     try {
-      const res = await analyzeImageWithAI(photo)
+      const res = await analyzeImageWithAI(photo, aiPrompt, aiModel)
       setAiCheck({ status: 'done', text: res.text })
     } catch (err) {
       setAiCheck({
@@ -592,7 +600,7 @@ export function PhotoScreen() {
         text: err instanceof Error ? err.message : 'AI check failed',
       })
     }
-  }, [photo])
+  }, [photo, aiPrompt, aiModel])
 
   const canContinue = faceEval.allGood && detectorReady && !isValidating
   const photoRejected = !isValidating && detectorReady && !faceEval.allGood
@@ -676,7 +684,29 @@ export function PhotoScreen() {
         </div>
 
         {CAN_AI_CHECK && (
-          <div className="mt-3 flex w-full max-w-xs flex-col gap-2">
+          <div className="mt-3 flex w-full max-w-xs flex-col gap-2 text-left">
+            <label className="flex flex-col gap-1 text-[12px] font-semibold text-ink-muted">
+              Prompt
+              <textarea
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                rows={3}
+                spellCheck={false}
+                className="focus-ring w-full resize-y rounded-btn border border-berry/25 bg-surface/60 px-2.5 py-2 text-[13px] font-normal text-ink"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[12px] font-semibold text-ink-muted">
+              Model
+              <input
+                type="text"
+                value={aiModel}
+                onChange={(e) => setAiModel(e.target.value)}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                className="focus-ring w-full rounded-btn border border-berry/25 bg-surface/60 px-2.5 py-2 text-[13px] font-normal text-ink"
+              />
+            </label>
             <Button
               variant="secondary"
               onClick={runAiCheck}
@@ -685,8 +715,8 @@ export function PhotoScreen() {
               {aiCheck.status === 'loading' ? 'Checking with AI…' : 'AI CHECK'}
             </Button>
             {aiCheck.status === 'done' && (
-              <div className="max-h-64 overflow-auto whitespace-pre-wrap rounded-panel border border-berry/25 bg-surface/50 p-3 text-left text-[13px] text-ink">
-                {aiCheck.text}
+              <div className="max-h-72 overflow-auto rounded-panel border border-berry/25 bg-surface/50 p-3 text-left text-ink">
+                <MarkdownLite text={aiCheck.text} />
               </div>
             )}
             {aiCheck.status === 'error' && (
