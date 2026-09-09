@@ -52,17 +52,20 @@ export const CFG = {
   // shifted toward blue / desaturated — and (b) differ substantially from the
   // cheeks, OR the lips are no longer redder than the cheeks. A beard / jaw
   // shadow only makes the area darker while KEEPING skin chroma, so (a) fails.
-// Optimized Thresholds & Dynamic Logic
-maskBrightDelta: 24,        // Brightness boost (surgical / white masks)
-maskBlueShiftMin: 0.015,     // Reduced slightly to prevent missing black/dark masks
-maskRedDropMin: 0.022,       // Primary trigger for fabric coverage
-maskColorDelta: 20,          // Distance threshold in RGB
-maskLipRednessRatio: 0.88,   // Slightly tighter bound to avoid false triggers on muted lipsmaskBlueShiftMin: 0.018,
-  // A grey/white beard is chromatically close to a pale mask, but far more
-  // textured than skin. Treat a lower face much noisier than the forehead as
-  // facial hair, not fabric.
-  maskBeardTextureRatio: 1.5,
-  maskBeardTextureMin: 18,
+  maskBrightDelta: 24, // lower face this much brighter than cheeks = surgical/white mask
+  maskBlueShiftMin: 0.015, // chromaticity shift toward blue vs cheeks
+  maskRedDropMin: 0.022, // chromaticity drop in red vs cheeks
+  maskColorDelta: 20, // RGB distance between lower face and cheeks
+  maskLipRednessRatio: 0.88, // lips must stay at least this fraction as red as cheeks
+
+  // Beard vs fabric, by TEXTURE — and exposure-invariant. A beard's coefficient
+  // of variation (luma std-dev / mean luma) stays high in any light; smooth
+  // fabric stays low. Raw std-dev collapses when the light drops or the head
+  // tilts, which used to let a dim / off-frontal grey beard read as a mask —
+  // CoV does not. Measured against the *smoother* of forehead / cheeks, since an
+  // ageing forehead is itself creased.
+  maskBeardCoVRatio: 1.35, // lower-face CoV must exceed the skin CoV by this factor
+  maskBeardCoVMin: 0.16, // ...and clear this absolute floor
   // left and right halves of the eye–cheek band: on a real frontal face they
   // match; a covering flattens one side (its eye/features vanish) and usually
   // shifts its colour or brightness.
@@ -328,19 +331,27 @@ export function sampleFaceSharpness(
 type RegionStats = {
   lum: number
   stdDev: number
+  /** Coefficient of variation: stdDev / mean luma. Exposure-invariant texture. */
+  cov: number
   r: number
   g: number
   b: number
   brightFrac: number
 }
 
+// Reused across every statsFromImageData call so a frame's ~13 region samples
+// don't each allocate (and then GC) a fresh Float64Array. Sized for the shared
+// 80×80 sample canvas; grows if a caller ever passes something larger.
+let lumScratch = new Float64Array(80 * 80)
+
 function statsFromImageData(data: Uint8ClampedArray): RegionStats {
   const n = data.length / 4
+  if (lumScratch.length < n) lumScratch = new Float64Array(n)
+  const lums = lumScratch
   let sumL = 0
   let sumR = 0
   let sumG = 0
   let sumB = 0
-  const lums = new Float64Array(n)
   for (let i = 0, j = 0; i < data.length; i += 4, j += 1) {
     const l = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]
     lums[j] = l
@@ -356,9 +367,11 @@ function statsFromImageData(data: Uint8ClampedArray): RegionStats {
     variance += (lums[j] - meanL) ** 2
     if (lums[j] > 235) bright += 1
   }
+  const stdDev = Math.sqrt(variance / n)
   return {
     lum: meanL,
-    stdDev: Math.sqrt(variance / n),
+    stdDev,
+    cov: stdDev / Math.max(1, meanL),
     r: sumR / n,
     g: sumG / n,
     b: sumB / n,
@@ -560,13 +573,23 @@ export function evaluateCoverage(
   const sigLipsHidden =
     !!lips && lipRedness < cheekRedness * CFG.maskLipRednessRatio
 
+  // Exposure-invariant beard guard: compare the lower face's coefficient of
+  // variation to the smoother of forehead / cheeks. A beard stays textured in
+  // any light or head angle; smooth fabric does not.
+  const cheekCoV = cheeks.reduce((s, x) => s + x.cov, 0) / cheeks.length
+  const skinCoV = Math.min(forehead.cov, cheekCoV)
   const beardTexture =
     !!lowerFace &&
-    lowerFace.stdDev >
-      Math.max(CFG.maskBeardTextureMin, forehead.stdDev * CFG.maskBeardTextureRatio)
+    lowerFace.cov > Math.max(CFG.maskBeardCoVMin, skinCoV * CFG.maskBeardCoVRatio)
 
+  // The beard guard is bypassed when the lower face is genuinely BRIGHTER than
+  // the cheeks — a beard is always darker, so a bright lower face is fabric
+  // (surgical / white / light mask) even if its fold shadows read as textured.
   const mask =
-    !!lowerFace && notBeard && !beardTexture && (sigColourBreak || sigLipsHidden)
+    !!lowerFace &&
+    notBeard &&
+    (sigBrighter || !beardTexture) &&
+    (sigColourBreak || sigLipsHidden)
 
   // --- Partial occlusion: a hand / hair over one side of the face ---
   // On a frontal face the left and right halves of the eye–cheek band match:
@@ -612,6 +635,9 @@ export function evaluateCoverage(
       eyeBandGlare: eyeBand ? +eyeBand.brightFrac.toFixed(3) : null,
       bridgeLum: noseBridge ? +noseBridge.lum.toFixed(1) : null,
       foreheadStd: +forehead.stdDev.toFixed(1),
+      lowerFaceCoV: lowerFace ? +lowerFace.cov.toFixed(3) : null,
+      skinCoV: +skinCoV.toFixed(3),
+      beardTexture,
       templeMinLum: Number.isFinite(templeMinLum) ? +templeMinLum.toFixed(1) : null,
       maskColor: +maskColor.toFixed(1),
       blueShift: +blueShift.toFixed(3),
