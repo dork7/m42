@@ -1,52 +1,21 @@
 /*
- * Standalone guided face capture — vanilla JS port of the m42 PhotoScreen flow.
- *
- * Same five checks as the app (lighting, head pose, face position, glasses,
- * mask/occlusion), same tunables (CFG), auto-capture after a hold, preview +
- * retake.
- *
- * Desktop: runs straight from file:// — open index.html in a browser, no server
- * needed (getUserMedia treats file:// as a secure context on desktop Chrome /
- * Safari / Firefox).
- *
- * iPhone / iPad: iOS Safari does NOT expose the camera on file:// or plain
- * http:// — `navigator.mediaDevices` is undefined there. On iOS this page must
- * be served over https:// (any static HTTPS host). The code detects the
- * insecure-context case and says so rather than failing opaquely.
- *
- * MediaPipe (runtime + WASM + model) is pulled from a CDN, so the page needs an
- * internet connection but no build step and no local assets.
- *
- * index.html loads the ESM runtime from the CDN in an inline module and hands it
- * to us on window.__mpVision, then injects this file as a classic script (an
- * external `<script type="module">` is CORS-blocked on file://, a classic one
- * isn't).
+ * React port of face-capture/face-capture.js — the standalone guided face
+ * capture + live skin-map controller. Same logic; mounted from FaceApp.tsx
+ * against a DOM subtree carrying the same element ids.
  */
-;(function () {
-// The ESM runtime is imported by the inline module in index.html and handed
-// over on window.__mpVision. If that import failed — offline, or the CDN is
-// blocked (some corporate / government networks filter jsdelivr) — bail out
-// with a visible message instead of a blank page.
-if (!window.__mpVision || !window.__mpVision.FaceLandmarker) {
-  const err = document.getElementById('camera-error')
-  if (err) {
-    err.textContent =
-      'Face detection could not load. This page needs an internet connection ' +
-      'and access to the jsdelivr CDN. Check your connection and reload.'
-    err.hidden = false
-  }
-  const msg = document.getElementById('message')
-  if (msg) msg.textContent = 'Face detection unavailable.'
-  return
-}
-const { FaceLandmarker, FilesetResolver } = window.__mpVision
+// @ts-nocheck
+/* eslint-disable */
+import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
+import * as SkinMetrics from './skinMetrics'
 
-// jsdelivr serves these with `Access-Control-Allow-Origin: *`, so a file:// page
-// (null origin) can fetch them; the model bucket is CORS-enabled too.
-const MP_VERSION = '1.0.1'
-const WASM_PATH = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/wasm`
-const MODEL_PATH =
-  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
+// Self-hosted MediaPipe assets (same as src/lib/faceDetection.ts).
+const WASM_PATH = `${import.meta.env.BASE_URL}vendor/mediapipe/wasm`
+const MODEL_PATH = `${import.meta.env.BASE_URL}models/face_landmarker.task`
+
+export function mountFaceApp() {
+const teardown = []
+const addDoc = (ev, fn) => { document.addEventListener(ev, fn); teardown.push(() => document.removeEventListener(ev, fn)) }
+const addWin = (ev, fn) => { window.addEventListener(ev, fn); teardown.push(() => window.removeEventListener(ev, fn)) }
 
 // ---------------------------------------------------------------------------
 // Tunables — copied verbatim from src/lib/faceGuide.ts (CFG)
@@ -804,7 +773,7 @@ function renderGuide(valid) {
 
 // ---------------------------------------------------------------------------
 // Live skin map — overlay on the camera feed + tappable metric strip.
-// window.SkinMetrics.analyzeMap runs a lightweight per-region pass every
+// SkinMetrics.analyzeMap runs a lightweight per-region pass every
 // ~320 ms while a metric is selected; the overlay redraws each detection.
 // ---------------------------------------------------------------------------
 const METRIC_BY_KEY = {}
@@ -925,11 +894,11 @@ function regionSeverity(region, key) {
 }
 
 function buildMetricRail() {
-  if (!window.SkinMetrics || !els.metricRail || els.metricRail.childElementCount) return
-  window.SkinMetrics.METRICS.forEach((m) => {
+  if (!SkinMetrics || !els.metricRail || els.metricRail.childElementCount) return
+  SkinMetrics.METRICS.forEach((m) => {
     METRIC_BY_KEY[m.key] = m
   })
-  els.metricRail.innerHTML = window.SkinMetrics.METRICS.map(
+  els.metricRail.innerHTML = SkinMetrics.METRICS.map(
     (m) =>
       `<button type="button" data-key="${m.key}" aria-pressed="false">` +
       `<span class="name">${m.label}</span>` +
@@ -1073,13 +1042,13 @@ function drawOverlay() {
   }
   const metrics = [...state.activeMetrics]
   const map = state.mapData
-  const REGIONS = window.SkinMetrics?.REGIONS
+  const REGIONS = SkinMetrics?.REGIONS
 
   // ---- whole-face outline (expanded past the mesh oval to hairline / jaw) ----
-  if (overlayLayers.outline && window.SkinMetrics?.FACE_OVAL) {
+  if (overlayLayers.outline && SkinMetrics?.FACE_OVAL) {
     const c = faceCentroid(L)
     tracePoly(
-      window.SkinMetrics.FACE_OVAL.map((i) => L[i])
+      SkinMetrics.FACE_OVAL.map((i) => L[i])
         .filter(Boolean)
         .map((p) => [
           c.x + (p.x - c.x) * OVAL_EXPAND.x,
@@ -1158,7 +1127,7 @@ function drawOverlay() {
 }
 
 function applyLiveMapVisibility() {
-  const on = liveMapEnabled && window.SkinMetrics
+  const on = liveMapEnabled && SkinMetrics
   els.overlay.hidden = !on
   els.layerStrip.hidden = !on
   els.metricSide.hidden = !on
@@ -1345,12 +1314,12 @@ function tick(timestamp) {
     if (
       liveMapEnabled &&
       state.lastLandmarks &&
-      window.SkinMetrics &&
+      SkinMetrics &&
       timestamp - state.lastMapAt >= 320
     ) {
       state.lastMapAt = timestamp
       try {
-        state.mapData = window.SkinMetrics.analyzeMap(
+        state.mapData = SkinMetrics.analyzeMap(
           state.lastLandmarks,
           video,
           video.videoWidth,
@@ -1395,12 +1364,12 @@ function tick(timestamp) {
 }
 
 // ---------------------------------------------------------------------------
-// Skin-age panel (window.SkinMetrics, defined in skin-metrics.js)
+// Skin-age panel (SkinMetrics, defined in skin-metrics.js)
 // ---------------------------------------------------------------------------
 function renderSkinSkeleton() {
-  if (!window.SkinMetrics || !els.skinGrid) return
+  if (!SkinMetrics || !els.skinGrid) return
   els.skinAgeVal.textContent = '•••'
-  els.skinGrid.innerHTML = window.SkinMetrics.METRICS.map(
+  els.skinGrid.innerHTML = SkinMetrics.METRICS.map(
     (m) => `
       <div class="skin-metric">
         <div class="ring" style="border-color:${m.color}"><b>•••</b></div>
@@ -1468,10 +1437,10 @@ async function validateStill(dataUrl) {
     els.previewMessage.dataset.state = faceEval.allGood ? 'ok' : 'bad'
 
     // Skin-age panel: run the metric heuristics on the still + its face mesh.
-    if (landmarks && landmarks.length > 0 && window.SkinMetrics) {
+    if (landmarks && landmarks.length > 0 && SkinMetrics) {
       try {
         renderSkinReport(
-          window.SkinMetrics.analyze(landmarks, img, img.naturalWidth, img.naturalHeight),
+          SkinMetrics.analyze(landmarks, img, img.naturalWidth, img.naturalHeight),
         )
       } catch (err) {
         console.error('skin metrics', err)
@@ -1606,7 +1575,7 @@ async function startCamera() {
 // iOS suspends getUserMedia tracks and rAF when Safari backgrounds; coming back
 // leaves a frozen frame. Tear the camera down on hide so returning is a clean
 // restart rather than a stuck preview.
-document.addEventListener('visibilitychange', () => {
+addDoc('visibilitychange', () => {
   if (document.hidden && state.mode === 'camera' && !state.captured) {
     stopCamera({ release: true })
     resetTracking()
@@ -1663,7 +1632,7 @@ els.liveMap.addEventListener('change', () => {
 })
 
 // Keep the overlay canvas matched to the frame on rotor / resize.
-window.addEventListener('resize', () => {
+addWin('resize', () => {
   if (state.mode === 'camera' && liveMapEnabled) {
     sizeOverlay()
     drawOverlay()
@@ -1674,4 +1643,9 @@ window.addEventListener('resize', () => {
 // that require a user gesture for the camera (notably iOS Safari), startCamera()
 // falls back to the #screen-choose screen with a "Start camera" button.
 startCamera()
-})()
+
+return () => {
+  stopCamera({ release: true })
+  teardown.forEach((fn) => fn())
+}
+}

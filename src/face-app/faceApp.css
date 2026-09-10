@@ -1,0 +1,446 @@
+/* Ported from face-capture/index.html <style>, scoped under .fc-app */
+.fc-app {
+      --berry: #c2255c;
+      --berry-soft: #ffe3ee;
+      --ink: #1f1430;
+      --ink-muted: #6b6478;
+      --surface: #ffffff;
+      --bg: #f6f2f7;
+      --good: #10b981;
+      --warn: #f59e0b;
+      --bad: #f43f5e;
+      --cam-zoom: 1.35; /* optical zoom applied to the live video + its overlay */
+      color-scheme: light dark;
+    }
+    @media (prefers-color-scheme: dark) {
+      .fc-app {
+        --berry: #ff6fa5;
+        --berry-soft: #3a1b2b;
+        --ink: #f4eef8;
+        --ink-muted: #a99fb5;
+        --surface: #241b31;
+        --bg: #160f1f;
+      }
+    }
+    .fc-app * { box-sizing: border-box; }
+    .fc-app {
+      margin: 0;
+      min-height: 100vh; /* fallback for iOS < 15.4 */
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      /* respect the notch / home-indicator safe areas on iPhone */
+      padding: calc(24px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+               calc(24px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      -webkit-text-size-adjust: 100%;
+    }
+    .fc-app .app { width: 100%; max-width: 410px; display: flex; flex-direction: column; align-items: center; }
+    /* each screen is its own centered column so fixed-width children
+       (the camera frame, chips, controls) stay horizontally centred */
+    .fc-app #screen-choose, .fc-app #screen-camera, .fc-app #screen-preview {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .fc-app h1 {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1.15;
+      margin: 0;
+      text-align: center;
+    }
+    .fc-app .sub { margin: 8px 0 0; text-align: center; color: var(--ink-muted); font-size: 15px; }
+    .fc-app [hidden] { display: none !important; }
+
+    /* choose screen */
+    .fc-app .choices { margin-top: 24px; display: grid; gap: 16px; width: 100%; }
+    .fc-app .choice {
+      appearance: none;
+      -webkit-appearance: none;
+      border: 1px solid var(--berry); /* fallback for iOS < 16.2 (no color-mix) */
+      border: 1px solid color-mix(in srgb, var(--berry) 25%, transparent);
+      background: var(--surface); /* fallback */
+      background: color-mix(in srgb, var(--surface) 70%, transparent);
+      -webkit-backdrop-filter: blur(8px);
+      backdrop-filter: blur(8px);
+      border-radius: 18px;
+      padding: 28px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--ink);
+      transition: transform .12s ease;
+    }
+    .fc-app .choice:hover { transform: scale(1.01); }
+    .fc-app .choice svg { width: 32px; height: 32px; stroke: var(--berry); }
+    .fc-app .error { margin-top: 16px; color: var(--berry); text-align: center; font-size: 13px; }
+
+    /* chips */
+    .fc-app .chips {
+      margin-top: 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      width: 100%;
+      max-width: 300px;
+    }
+    .fc-app .chip {
+      border-radius: 10px;
+      padding: 6px 8px;
+      text-align: center;
+      line-height: 1.15;
+      color: #fff;
+      background: var(--ink-muted);
+    }
+    .fc-app .chip.span-2 { grid-column: span 2; }
+    /* opaque fallbacks first for iOS < 16.2 (color-mix unsupported) */
+    .fc-app .chip[data-level="good"] { background: var(--good); background: color-mix(in srgb, var(--good) 90%, black); }
+    .fc-app .chip[data-level="warn"] { background: var(--warn); background: color-mix(in srgb, var(--warn) 90%, black); }
+    .fc-app .chip[data-level="bad"] { background: var(--bad);  background: color-mix(in srgb, var(--bad) 90%, black); }
+    .fc-app .chip-title { font-size: 11px; font-weight: 600; opacity: .95; }
+    .fc-app .chip-label { font-size: 12px; font-weight: 800; }
+
+    /* camera / preview frame */
+    .fc-app .frame {
+      position: relative;
+      margin-top: 12px;
+      width: 100%;
+      max-width: 280px;
+      aspect-ratio: 3 / 4;
+      overflow: hidden;
+      border-radius: 24px;
+      transform: translateZ(0);
+      -webkit-transform: translateZ(0);
+      contain: paint;
+      background: #000;
+    }
+    /* iOS < 15 has no aspect-ratio; give the frame an explicit height so the
+       object-cover video/img still has a box to fill. */
+    @supports not (aspect-ratio: 1 / 1) {
+      .fc-app .frame { height: 373px; }
+      .fc-app .rect-window { height: 218px; }
+    }
+    .fc-app .frame.bordered {
+      border: 2px solid var(--berry);
+      box-shadow: 0 0 24px rgba(194, 37, 92, 0.45); /* fallback */
+      box-shadow: 0 0 24px color-mix(in srgb, var(--berry) 45%, transparent);
+    }
+    .fc-app video, .fc-app .frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    /* mirror + a little optical zoom so the face fills more of the frame;
+       the overlay canvas gets the exact same transform so it stays aligned */
+    .fc-app video {
+      transform: scaleX(-1) scale(1.35);
+      transform: scaleX(-1) scale(var(--cam-zoom));
+      -webkit-transform: scaleX(-1) scale(1.35);
+      -webkit-transform: scaleX(-1) scale(var(--cam-zoom));
+    }
+
+    /* camera + side rail sit next to each other (rail is NOT over the video).
+       The rail is absolutely placed in the reserved right-hand column so the
+       row's height comes only from the frame's 3:4 aspect ratio. */
+    .fc-app .camera-row {
+      position: relative;
+      margin: 12px auto 0;
+      width: 100%;
+      max-width: 404px;
+    }
+    .fc-app .camera-row .frame { margin-top: 0; width: min(280px, calc(100% - 122px)); }
+    .fc-app .metric-side {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      right: 0;
+      width: 114px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    /* guide overlay */
+    .fc-app .guide { position: absolute; inset: 0; pointer-events: none; }
+    .fc-app .guide .scrim { position: absolute; background: rgba(0,0,0,.28); }
+    .fc-app .guide[data-shape="oval"] .rect-guide { display: none; }
+    .fc-app .guide[data-shape="rectangle"] .oval-guide { display: none; }
+
+    .fc-app .rect-guide .scrim-top { inset: 0 0 auto 0; height: 20.75%; }
+    .fc-app .rect-guide .scrim-bottom { inset: auto 0 0 0; height: 20.75%; }
+    .fc-app .rect-guide .scrim-left { left: 0; top: 20.75%; bottom: 20.75%; width: 11%; }
+    .fc-app .rect-guide .scrim-right { right: 0; top: 20.75%; bottom: 20.75%; width: 11%; }
+    .fc-app .rect-window {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 78%;
+      aspect-ratio: 1 / 1;
+      border-radius: 20px;
+    }
+    .fc-app .bracket {
+      position: absolute;
+      width: 32px;
+      height: 32px;
+      border: 3px solid rgba(255,255,255,.7);
+      transition: border-color .2s ease;
+    }
+    .fc-app .guide[data-valid="true"] .bracket { border-color: var(--berry); }
+    .fc-app .guide[data-valid="true"] .oval-ellipse { stroke: var(--berry); }
+    .fc-app .bracket.tl { left: 0; top: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 18px; }
+    .fc-app .bracket.tr { right: 0; top: 0; border-left: 0; border-bottom: 0; border-top-right-radius: 18px; }
+    .fc-app .bracket.bl { left: 0; bottom: 0; border-right: 0; border-top: 0; border-bottom-left-radius: 18px; }
+    .fc-app .bracket.br { right: 0; bottom: 0; border-left: 0; border-top: 0; border-bottom-right-radius: 18px; }
+    .fc-app .oval-guide { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+    /* live skin-map overlay */
+    .fc-app .overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 2;
+      transform: scaleX(-1) scale(1.35); /* match the mirrored + zoomed video */
+      transform: scaleX(-1) scale(var(--cam-zoom));
+      -webkit-transform: scaleX(-1) scale(1.35);
+      -webkit-transform: scaleX(-1) scale(var(--cam-zoom));
+    }
+    .fc-app .guide { z-index: 3; }
+
+    /* spot counter — sits above the rail, beside the frame */
+    .fc-app .spot-count {
+      flex: 0 0 auto;
+      align-self: stretch;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--ink);
+      background: var(--berry-soft); /* fallback */
+      background: color-mix(in srgb, var(--berry) 16%, transparent);
+      border-radius: 7px;
+      padding: 4px 6px;
+    }
+
+    /* metric rail — vertical list beside the camera (not over it) */
+    .fc-app .metric-rail {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .fc-app .metric-rail::-webkit-scrollbar { display: none; }
+    .fc-app .metric-rail button {
+      appearance: none;
+      -webkit-appearance: none;
+      flex: 0 0 auto;
+      border: 1px solid var(--berry); /* fallback */
+      border: 1px solid color-mix(in srgb, var(--berry) 20%, transparent);
+      border-radius: 8px;
+      padding: 6px 8px;
+      background: var(--surface);
+      color: var(--ink);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      text-align: right;
+    }
+    .fc-app .metric-rail button .name { font-size: 10.5px; font-weight: 700; line-height: 1.1; }
+    .fc-app .metric-rail button .bar {
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: color-mix(in srgb, var(--ink-muted) 35%, transparent);
+      overflow: hidden;
+    }
+    .fc-app .metric-rail button .bar i { display: block; height: 100%; width: 0; transition: width .25s ease; }
+    .fc-app .metric-rail button .val { font-size: 11px; font-weight: 800; text-shadow: 0 1px 2px rgba(0,0,0,0.85); }
+    .fc-app .metric-rail button[aria-pressed="true"] {
+      background: var(--berry-soft); /* fallback */
+      background: color-mix(in srgb, var(--berry) 14%, var(--surface));
+      border-color: var(--berry);
+      font-weight: 800;
+    }
+
+    /* layer toggles — horizontal strip under the frame */
+    .fc-app .layer-strip {
+      margin-top: 12px;
+      width: 100%;
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .fc-app .layer-strip::-webkit-scrollbar { display: none; }
+    .fc-app .layer-strip button {
+      appearance: none;
+      -webkit-appearance: none;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      border: 1px solid var(--berry); /* fallback */
+      border: 1px solid color-mix(in srgb, var(--berry) 28%, transparent);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+      opacity: .55;
+      transition: opacity .12s ease;
+    }
+    .fc-app .layer-strip button[aria-pressed="true"] { color: #fff; border-color: transparent; opacity: 1; }
+    .fc-app .layer-strip button .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+    .fc-app .layer-strip button[aria-pressed="true"] .dot { background: #fff !important; }
+    .fc-app .metric-strip-hint { margin: 6px 0 0; font-size: 11px; text-align: center; color: var(--ink-muted); }
+
+    /* messages + buttons */
+    .fc-app .message {
+      margin-top: 12px;
+      font-size: 13px;
+      text-align: center;
+      color: var(--berry);
+      min-height: 1.2em;
+    }
+    .fc-app .message[data-ok="true"] { color: var(--ink-muted); }
+    .fc-app .preview-message {
+      margin-top: 12px;
+      font-size: 13px;
+      text-align: center;
+      color: var(--ink-muted);
+      max-width: 280px;
+    }
+    .fc-app .preview-message[data-state="bad"] { color: var(--berry); }
+
+    .fc-app .actions { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; }
+    .fc-app button.btn {
+      appearance: none;
+      -webkit-appearance: none;
+      border: 0;
+      border-radius: 12px;
+      padding: 13px 16px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      background: var(--berry);
+      color: #fff;
+      transition: opacity .15s ease;
+    }
+    .fc-app button.btn.secondary {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--berry); /* fallback */
+      border: 1px solid color-mix(in srgb, var(--berry) 35%, transparent);
+    }
+    .fc-app button.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* settings */
+    .fc-app .settings {
+      margin-top: 16px;
+      width: 100%;
+      max-width: 300px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: var(--surface); /* fallbacks first for iOS < 16.2 */
+      background: color-mix(in srgb, var(--surface) 60%, transparent);
+      border: 1px solid var(--berry);
+      border: 1px solid color-mix(in srgb, var(--berry) 18%, transparent);
+    }
+    .fc-app .settings label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-muted);
+      cursor: pointer;
+    }
+    .fc-app .hint { margin-top: 12px; font-size: 12px; text-align: center; color: var(--ink-muted); }
+    .fc-app canvas.hidden { display: none; }
+
+    /* skin-age panel */
+    .fc-app .skin-panel {
+      margin-top: 20px;
+      width: 100%;
+      padding: 16px 12px;
+      border-radius: 16px;
+      background: var(--surface); /* fallback */
+      background: color-mix(in srgb, var(--surface) 65%, transparent);
+      border: 1px solid var(--berry); /* fallback */
+      border: 1px solid color-mix(in srgb, var(--berry) 18%, transparent);
+    }
+    .fc-app .skin-age {
+      text-align: center;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--ink);
+      margin-bottom: 16px;
+    }
+    .fc-app .skin-age span { color: var(--berry); }
+    .fc-app .skin-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px 4px;
+    }
+    .fc-app .skin-metric {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      text-align: center;
+    }
+    .fc-app .skin-metric .ring {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      border: 3px solid var(--ink-muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--ink);
+    }
+    .fc-app .skin-metric .ring b { font-size: 16px; font-weight: 800; line-height: 1; }
+    .fc-app .skin-metric .ring small {
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      opacity: .65;
+      margin-top: 3px;
+    }
+    .fc-app .skin-metric .label {
+      font-size: 10.5px;
+      font-weight: 600;
+      line-height: 1.15;
+      color: var(--ink-muted);
+      max-width: 92px;
+    }
+    .fc-app .skin-disclaimer { margin-top: 14px; font-size: 10.5px; text-align: center; color: var(--ink-muted); }

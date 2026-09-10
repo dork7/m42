@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
   <title>Face Capture</title>
   <style>
     :root {
@@ -15,6 +16,7 @@
       --good: #10b981;
       --warn: #f59e0b;
       --bad: #f43f5e;
+      --cam-zoom: 1.35; /* optical zoom applied to the live video + its overlay */
       color-scheme: light dark;
     }
     @media (prefers-color-scheme: dark) {
@@ -30,16 +32,28 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
+      min-height: 100vh; /* fallback for iOS < 15.4 */
       min-height: 100dvh;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px 16px;
+      /* respect the notch / home-indicator safe areas on iPhone */
+      padding: calc(24px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+               calc(24px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
       background: var(--bg);
       color: var(--ink);
       font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      -webkit-text-size-adjust: 100%;
     }
-    .app { width: 100%; max-width: 340px; display: flex; flex-direction: column; align-items: center; }
+    .app { width: 100%; max-width: 410px; display: flex; flex-direction: column; align-items: center; }
+    /* each screen is its own centered column so fixed-width children
+       (the camera frame, chips, controls) stay horizontally centred */
+    #screen-choose, #screen-camera, #screen-preview {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
     h1 {
       font-size: 28px;
       font-weight: 700;
@@ -54,8 +68,12 @@
     .choices { margin-top: 24px; display: grid; gap: 16px; width: 100%; }
     .choice {
       appearance: none;
+      -webkit-appearance: none;
+      border: 1px solid var(--berry); /* fallback for iOS < 16.2 (no color-mix) */
       border: 1px solid color-mix(in srgb, var(--berry) 25%, transparent);
+      background: var(--surface); /* fallback */
       background: color-mix(in srgb, var(--surface) 70%, transparent);
+      -webkit-backdrop-filter: blur(8px);
       backdrop-filter: blur(8px);
       border-radius: 18px;
       padding: 28px 16px;
@@ -91,9 +109,10 @@
       background: var(--ink-muted);
     }
     .chip.span-2 { grid-column: span 2; }
-    .chip[data-level="good"] { background: color-mix(in srgb, var(--good) 90%, black); }
-    .chip[data-level="warn"] { background: color-mix(in srgb, var(--warn) 90%, black); }
-    .chip[data-level="bad"]  { background: color-mix(in srgb, var(--bad) 90%, black); }
+    /* opaque fallbacks first for iOS < 16.2 (color-mix unsupported) */
+    .chip[data-level="good"] { background: var(--good); background: color-mix(in srgb, var(--good) 90%, black); }
+    .chip[data-level="warn"] { background: var(--warn); background: color-mix(in srgb, var(--warn) 90%, black); }
+    .chip[data-level="bad"]  { background: var(--bad);  background: color-mix(in srgb, var(--bad) 90%, black); }
     .chip-title { font-size: 11px; font-weight: 600; opacity: .95; }
     .chip-label { font-size: 12px; font-weight: 800; }
 
@@ -107,17 +126,56 @@
       overflow: hidden;
       border-radius: 24px;
       transform: translateZ(0);
+      -webkit-transform: translateZ(0);
       contain: paint;
       background: #000;
     }
-    .frame.bordered { border: 2px solid var(--berry); box-shadow: 0 0 24px color-mix(in srgb, var(--berry) 45%, transparent); }
+    /* iOS < 15 has no aspect-ratio; give the frame an explicit height so the
+       object-cover video/img still has a box to fill. */
+    @supports not (aspect-ratio: 1 / 1) {
+      .frame { height: 373px; }
+      .rect-window { height: 218px; }
+    }
+    .frame.bordered {
+      border: 2px solid var(--berry);
+      box-shadow: 0 0 24px rgba(194, 37, 92, 0.45); /* fallback */
+      box-shadow: 0 0 24px color-mix(in srgb, var(--berry) 45%, transparent);
+    }
     video, .frame img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
     }
-    video { transform: scaleX(-1); }
+    /* mirror + a little optical zoom so the face fills more of the frame;
+       the overlay canvas gets the exact same transform so it stays aligned */
+    video {
+      transform: scaleX(-1) scale(1.35);
+      transform: scaleX(-1) scale(var(--cam-zoom));
+      -webkit-transform: scaleX(-1) scale(1.35);
+      -webkit-transform: scaleX(-1) scale(var(--cam-zoom));
+    }
+
+    /* camera + side rail sit next to each other (rail is NOT over the video).
+       The rail is absolutely placed in the reserved right-hand column so the
+       row's height comes only from the frame's 3:4 aspect ratio. */
+    .camera-row {
+      position: relative;
+      margin: 12px auto 0;
+      width: 100%;
+      max-width: 404px;
+    }
+    .camera-row .frame { margin-top: 0; width: min(280px, calc(100% - 122px)); }
+    .metric-side {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      right: 0;
+      width: 114px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
 
     /* guide overlay */
     .guide { position: absolute; inset: 0; pointer-events: none; }
@@ -153,6 +211,118 @@
     .bracket.br { right: 0; bottom: 0; border-left: 0; border-top: 0; border-bottom-right-radius: 18px; }
     .oval-guide { position: absolute; inset: 0; width: 100%; height: 100%; }
 
+    /* live skin-map overlay */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 2;
+      transform: scaleX(-1) scale(1.35); /* match the mirrored + zoomed video */
+      transform: scaleX(-1) scale(var(--cam-zoom));
+      -webkit-transform: scaleX(-1) scale(1.35);
+      -webkit-transform: scaleX(-1) scale(var(--cam-zoom));
+    }
+    .guide { z-index: 3; }
+
+    /* spot counter — sits above the rail, beside the frame */
+    .spot-count {
+      flex: 0 0 auto;
+      align-self: stretch;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--ink);
+      background: var(--berry-soft); /* fallback */
+      background: color-mix(in srgb, var(--berry) 16%, transparent);
+      border-radius: 7px;
+      padding: 4px 6px;
+    }
+
+    /* metric rail — vertical list beside the camera (not over it) */
+    .metric-rail {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .metric-rail::-webkit-scrollbar { display: none; }
+    .metric-rail button {
+      appearance: none;
+      -webkit-appearance: none;
+      flex: 0 0 auto;
+      border: 1px solid var(--berry); /* fallback */
+      border: 1px solid color-mix(in srgb, var(--berry) 20%, transparent);
+      border-radius: 8px;
+      padding: 6px 8px;
+      background: var(--surface);
+      color: var(--ink);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      text-align: right;
+    }
+    .metric-rail button .name { font-size: 10.5px; font-weight: 700; line-height: 1.1; }
+    .metric-rail button .bar {
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: color-mix(in srgb, var(--ink-muted) 35%, transparent);
+      overflow: hidden;
+    }
+    .metric-rail button .bar i { display: block; height: 100%; width: 0; transition: width .25s ease; }
+    .metric-rail button .val { font-size: 11px; font-weight: 800; text-shadow: 0 1px 2px rgba(0,0,0,0.85); }
+    .metric-rail button[aria-pressed="true"] {
+      background: var(--berry-soft); /* fallback */
+      background: color-mix(in srgb, var(--berry) 14%, var(--surface));
+      border-color: var(--berry);
+      font-weight: 800;
+    }
+
+    /* layer toggles — horizontal strip under the frame */
+    .layer-strip {
+      margin-top: 12px;
+      width: 100%;
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .layer-strip::-webkit-scrollbar { display: none; }
+    .layer-strip button {
+      appearance: none;
+      -webkit-appearance: none;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      border: 1px solid var(--berry); /* fallback */
+      border: 1px solid color-mix(in srgb, var(--berry) 28%, transparent);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+      opacity: .55;
+      transition: opacity .12s ease;
+    }
+    .layer-strip button[aria-pressed="true"] { color: #fff; border-color: transparent; opacity: 1; }
+    .layer-strip button .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+    .layer-strip button[aria-pressed="true"] .dot { background: #fff !important; }
+    .metric-strip-hint { margin: 6px 0 0; font-size: 11px; text-align: center; color: var(--ink-muted); }
+
     /* messages + buttons */
     .message {
       margin-top: 12px;
@@ -174,6 +344,7 @@
     .actions { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; }
     button.btn {
       appearance: none;
+      -webkit-appearance: none;
       border: 0;
       border-radius: 12px;
       padding: 13px 16px;
@@ -187,6 +358,7 @@
     button.btn.secondary {
       background: transparent;
       color: var(--ink);
+      border: 1px solid var(--berry); /* fallback */
       border: 1px solid color-mix(in srgb, var(--berry) 35%, transparent);
     }
     button.btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -201,7 +373,9 @@
       gap: 8px;
       padding: 12px 14px;
       border-radius: 14px;
+      background: var(--surface); /* fallbacks first for iOS < 16.2 */
       background: color-mix(in srgb, var(--surface) 60%, transparent);
+      border: 1px solid var(--berry);
       border: 1px solid color-mix(in srgb, var(--berry) 18%, transparent);
     }
     .settings label {
@@ -215,14 +389,79 @@
     }
     .hint { margin-top: 12px; font-size: 12px; text-align: center; color: var(--ink-muted); }
     canvas.hidden { display: none; }
+
+    /* skin-age panel */
+    .skin-panel {
+      margin-top: 20px;
+      width: 100%;
+      padding: 16px 12px;
+      border-radius: 16px;
+      background: var(--surface); /* fallback */
+      background: color-mix(in srgb, var(--surface) 65%, transparent);
+      border: 1px solid var(--berry); /* fallback */
+      border: 1px solid color-mix(in srgb, var(--berry) 18%, transparent);
+    }
+    .skin-age {
+      text-align: center;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--ink);
+      margin-bottom: 16px;
+    }
+    .skin-age span { color: var(--berry); }
+    .skin-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px 4px;
+    }
+    .skin-metric {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      text-align: center;
+    }
+    .skin-metric .ring {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      border: 3px solid var(--ink-muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--ink);
+    }
+    .skin-metric .ring b { font-size: 16px; font-weight: 800; line-height: 1; }
+    .skin-metric .ring small {
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      opacity: .65;
+      margin-top: 3px;
+    }
+    .skin-metric .label {
+      font-size: 10.5px;
+      font-weight: 600;
+      line-height: 1.15;
+      color: var(--ink-muted);
+      max-width: 92px;
+    }
+    .skin-disclaimer { margin-top: 14px; font-size: 10.5px; text-align: center; color: var(--ink-muted); }
   </style>
 </head>
 <body>
   <div class="app">
     <h1>Time for your close-up</h1>
 
-    <!-- ── Choose ─────────────────────────────────────────── -->
-    <section id="screen-choose">
+    <!-- ── Fallback / error ───────────────────────────────────
+         Scanning starts automatically on load. This screen only
+         appears when the camera can't start on its own (e.g. iOS
+         Safari needs a tap to grant the camera). -->
+    <section id="screen-choose" hidden>
       <p class="sub">Natural light, no filters, face centered — this helps us read your skin accurately.</p>
       <p id="camera-error" class="error" role="alert" hidden></p>
       <div class="choices">
@@ -231,13 +470,13 @@
             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
             <circle cx="12" cy="13" r="4"/>
           </svg>
-          <span>Take a photo</span>
+          <span>Start camera</span>
         </button>
       </div>
     </section>
 
     <!-- ── Camera ─────────────────────────────────────────── -->
-    <section id="screen-camera" hidden>
+    <section id="screen-camera">
       <div class="chips">
         <div class="chip" id="chip-light"><div class="chip-title">Lighting</div><div class="chip-label">—</div></div>
         <div class="chip" id="chip-pose"><div class="chip-title">Look Straight</div><div class="chip-label">No Face</div></div>
@@ -245,8 +484,10 @@
         <div class="chip" id="chip-coverage"><div class="chip-title">Face Clear</div><div class="chip-label">No Face</div></div>
       </div>
 
-      <div class="frame">
-        <video id="video" autoplay muted playsinline></video>
+      <div class="camera-row">
+       <div class="frame">
+        <video id="video" autoplay muted playsinline webkit-playsinline disablepictureinpicture></video>
+        <canvas id="overlay" class="overlay" aria-hidden="true" hidden></canvas>
         <div class="guide" id="guide" data-shape="rectangle" data-valid="false">
           <div class="rect-guide">
             <div class="scrim scrim-top"></div>
@@ -272,7 +513,18 @@
                      stroke="rgba(255,255,255,0.75)" stroke-width="3" stroke-dasharray="10 8"/>
           </svg>
         </div>
+       </div>
+       <div class="metric-side" id="metric-side" hidden>
+         <div class="spot-count" id="spot-count" hidden></div>
+         <div class="metric-rail" id="metric-rail" hidden></div>
+       </div>
       </div>
+
+      <div class="layer-strip" id="layer-strip" hidden></div>
+      <p class="metric-strip-hint" id="metric-strip-hint" hidden>
+        <span style="color:#ffbe3c">◯</span> spot / mole &nbsp;&nbsp;
+        <span style="color:#ff465a">▢</span> possible scar
+      </p>
 
       <p class="message" id="message" data-ok="false">Loading face detection…</p>
       <canvas id="capture-canvas" class="hidden"></canvas>
@@ -292,6 +544,9 @@
         <label>Face-covering check
           <input type="checkbox" id="opt-coverage" />
         </label>
+        <label>Live skin map
+          <input type="checkbox" id="opt-livemap" />
+        </label>
       </div>
       <p class="hint">Framing &amp; coverage guidance only — not a liveness check.</p>
     </section>
@@ -304,6 +559,13 @@
       </div>
       <p class="preview-message" id="preview-message" data-state="checking">Checking your photo…</p>
       <p class="hint">Your photo stays in your browser — nothing is uploaded.</p>
+
+      <section class="skin-panel" id="skin-panel" hidden>
+        <div class="skin-age">Skin Age: <span id="skin-age-val">•••</span></div>
+        <div class="skin-grid" id="skin-grid"></div>
+        <p class="skin-disclaimer">On-device estimate from a single photo — a skincare guide, not a medical assessment.</p>
+      </section>
+
       <div class="actions">
         <button type="button" id="retake-btn" class="btn secondary">Retake</button>
       </div>
@@ -311,20 +573,51 @@
   </div>
 
   <!--
-    Runs straight from file:// — no server, no build step. Needs an internet
-    connection: MediaPipe (runtime + WASM + model) loads from a CDN.
+    Desktop dev: runs straight from file:// — no server, no build step.
+    iPhone / iPad: the camera only works in a SECURE CONTEXT, so on iOS this
+      page MUST be served over https:// (a file:// or plain http:// page has
+      no navigator.mediaDevices there). Any static HTTPS host works.
+    Either way it needs an internet connection: MediaPipe (runtime + WASM +
+      model) loads from the jsdelivr CDN.
 
-    The inline module below imports the ESM runtime cross-origin (allowed from
-    file://), then injects face-capture.js as a *classic* script — an external
-    `<script type="module" src>` is CORS-blocked on file://, a classic one isn't.
+    The inline module below dynamic-imports the ESM runtime cross-origin
+    (allowed from file://), then injects face-capture.js as a *classic* script —
+    an external `<script type="module" src>` is CORS-blocked on file://, a
+    classic one isn't. If the CDN import fails the app still loads and shows an
+    error instead of a blank page.
   -->
   <script type="module">
-    import { FaceLandmarker, FilesetResolver }
-      from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs'
-    window.__mpVision = { FaceLandmarker, FilesetResolver }
-    const s = document.createElement('script')
-    s.src = './face-capture.js'
-    document.head.appendChild(s)
+    const loadApp = () => {
+      // skin-metrics.js first (defines window.SkinMetrics), then the app.
+      const sm = document.createElement('script')
+      sm.src = './skin-metrics.js'
+      const s = document.createElement('script')
+      s.src = './face-capture.js'
+      s.onerror = () => showFatal('Could not load face-capture.js.')
+      sm.onload = () => document.head.appendChild(s)
+      sm.onerror = () => document.head.appendChild(s) // app still runs, panel just stays hidden
+      document.head.appendChild(sm)
+    }
+    const showFatal = (detail) => {
+      const err = document.getElementById('camera-error')
+      if (err) {
+        err.textContent =
+          'Face detection could not load — this page needs an internet ' +
+          'connection and access to the jsdelivr CDN. Reload once you are online. ' +
+          '(' + detail + ')'
+        err.hidden = false
+      }
+    }
+    import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs')
+      .then((m) => {
+        window.__mpVision = { FaceLandmarker: m.FaceLandmarker, FilesetResolver: m.FilesetResolver }
+        loadApp()
+      })
+      .catch((e) => {
+        // Still load the app so it can render its own error state.
+        loadApp()
+        showFatal(String(e && e.message ? e.message : e))
+      })
   </script>
 </body>
 </html>

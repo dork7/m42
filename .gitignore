@@ -32,3 +32,5 @@ public/vendor/mediapipe/wasm
 testData
 
 face-capture/testset
+# local HTTPS certs (mkcert)
+.certs/
